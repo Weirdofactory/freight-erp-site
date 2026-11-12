@@ -227,10 +227,11 @@ async function renderImportLclDetail(id) {
    supabase.from('import_lcl_shipments').select('*').eq('id',id).eq('company_id',companyId).single(),
    supabase.from('import_lcl_containers').select('*').eq('shipment_id',id).eq('company_id',companyId).order('created_at'),
    supabase.from('import_lcl_milestones').select('*').eq('shipment_id',id).eq('company_id',companyId).order('milestone_at',{ascending:false}),
-   supabase.from('import_lcl_charges').select('*').eq('shipment_id',id).eq('company_id',companyId).order('created_at',{ascending:false})
+   supabase.from('import_lcl_charges').select('*').eq('shipment_id',id).eq('company_id',companyId).order('created_at',{ascending:false}),
+   supabase.from('import_lcl_documents').select('*').eq('shipment_id',id).eq('company_id',companyId).order('uploaded_at',{ascending:false})
   ]);
   qs.forEach(x=>{if(x.error)throw x.error;});
-  const s=qs[0].data, containers=qs[1].data||[], milestones=qs[2].data||[], charges=qs[3].data||[];
+  const s=qs[0].data, containers=qs[1].data||[], milestones=qs[2].data||[], charges=qs[3].data||[], documents=qs[4].data||[];
   const nice=x=>String(x||'').replaceAll('_',' ').replace(/\\b\\w/g,a=>a.toUpperCase());
   const fmt=x=>x?new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'—';
   const field=(label,name,value,type='text')=>'<div class="field"><label>'+label+'</label><input name="'+name+'" type="'+type+'" value="'+esc(value||'')+'"></div>';
@@ -240,6 +241,7 @@ async function renderImportLclDetail(id) {
   const containerRows=containers.map(x=>'<tr><td>'+esc(x.container_no)+'</td><td>'+esc(x.container_size||'—')+'</td><td>'+esc(x.seal_no||'—')+'</td><td>'+esc(x.gross_weight_kg||'—')+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">No containers added.</td></tr>';
   const milestoneRows=milestones.map(x=>'<div class="timeline-item"><strong>'+esc(nice(x.milestone_code))+'</strong><span>'+esc(fmt(x.milestone_at))+'</span><p>'+esc(x.location||'')+(x.notes?' · '+esc(x.notes):'')+'</p></div>').join('')||'<div class="empty">No milestones recorded.</div>';
   const chargeRows=charges.map(x=>'<tr><td>'+esc(x.charge_code)+'<br>'+esc(x.description)+'</td><td>'+esc(nice(x.charge_basis))+'</td><td>'+esc(x.quantity)+' × '+esc(x.rate)+' '+esc(x.currency_code)+'</td><td>'+esc(x.amount)+' '+esc(x.currency_code)+'</td><td>'+esc(nice(x.charge_side))+'</td><td>'+esc(nice(x.billing_status))+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">No charges entered.</td></tr>';
+  const docRows=documents.map(x=>'<tr><td><strong>'+esc(nice(x.document_type))+'</strong><br><small>'+esc(x.file_name)+'</small></td><td>'+esc(x.document_number||'—')+'</td><td>'+esc((x.file_size/1024/1024).toFixed(2))+' MB</td><td><select class="doc-status" data-id="'+esc(x.id)+'">'+['received','verified','rejected'].map(v=>'<option value="'+v+'" '+(x.status===v?'selected':'')+'>'+nice(v)+'</option>').join('')+'</select></td><td><button type="button" class="btn secondary doc-download" data-path="'+esc(x.storage_path)+'">Download</button></td></tr>').join('')||'<tr><td colspan="5" class="empty">No shipment documents uploaded yet.</td></tr>';
   const ops=field('ATA','ata',s.ata,'date')+field('Arrival notice date','arrival_notice_date',s.arrival_notice_date,'date')+field('CFS name','cfs_name',s.cfs_name)+field('CFS arrival','cfs_arrival_at',s.cfs_arrival_at?new Date(s.cfs_arrival_at).toISOString().slice(0,16):'','datetime-local')+field('Destuffed at','destuffed_at',s.destuffed_at?new Date(s.destuffed_at).toISOString().slice(0,16):'','datetime-local')+select('Shipment status','status',statuses,s.status)+select('Customs status','customs_status',['pending','filed','hold','exam','cleared'],s.customs_status)+select('Delivery status','delivery_status',['pending','do_issued','part_delivered','delivered'],s.delivery_status)+field('Remarks','remarks',s.remarks);
   root.innerHTML=shell(
    '<section class="heading"><div class="eyebrow">IMPORT LCL / SHIPMENT DETAIL</div><div class="module-heading"><div><h1>'+esc(s.shipment_no)+'</h1><p class="muted">'+esc(s.hbl_no||'HBL pending')+' · '+esc(s.agent_name||'')+' · '+esc(nice(s.status))+'</p></div><button id="back-lcl" class="btn secondary" type="button">← Shipment list</button></div></section>'+
@@ -247,6 +249,7 @@ async function renderImportLclDetail(id) {
    '<section class="section"><h2>Arrival, CFS, customs & delivery</h2><article class="panel"><form id="ops-form"><div class="form-grid">'+ops+'</div><div id="ops-message"></div><button class="btn" type="submit">Save operations →</button></form></article></section>'+
    '<section class="section"><h2>Container / consol details</h2><article class="panel"><form id="container-form"><div class="form-grid">'+field('Container number *','container_no','')+select('Size','container_size',['20','40','40 HQ','45'],'40 HQ')+field('Seal number','seal_no','')+field('Gross weight kg','gross_weight_kg','','number')+'</div><button class="btn" type="submit">Add container</button></form><div class="table-wrap"><table><thead><tr><th>CONTAINER</th><th>SIZE</th><th>SEAL</th><th>WEIGHT</th></tr></thead><tbody>'+containerRows+'</tbody></table></div></article></section>'+
    '<section class="section"><h2>Shipment milestones</h2><article class="panel"><form id="milestone-form"><div class="form-grid">'+select('Milestone','milestone_code',codes,'vessel_arrived')+field('Date & time','milestone_at',new Date().toISOString().slice(0,16),'datetime-local')+field('Location','location','')+field('Notes','notes','')+'</div><button class="btn" type="submit">Record milestone</button></form><div class="timeline">'+milestoneRows+'</div></article></section>'+
+   '<section class="section"><h2>Shipment documents</h2><article class="panel"><form id="document-form"><div class="form-grid">'+select('Document type','document_type',['hbl','mbl','commercial_invoice','packing_list','arrival_notice','delivery_order','customs_document','delivery_proof','photo','other'],'hbl')+field('Document number','document_number','')+'<div class="field"><label>Choose file * (PDF, image, Word or Excel; max 25 MB)</label><input name="document_file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx" required></div>'+field('Remarks','document_remarks','')+'</div><div id="document-message" aria-live="polite"></div><button class="btn" type="submit">Upload document →</button></form><div class="table-wrap"><table><thead><tr><th>DOCUMENT</th><th>NUMBER</th><th>SIZE</th><th>STATUS</th><th>FILE</th></tr></thead><tbody>'+docRows+'</tbody></table></div></article></section>'+
    '<section class="section"><h2>Shipment charges</h2><article class="panel"><form id="charge-form"><div class="form-grid">'+field('Charge code *','charge_code','')+field('Description *','description','')+select('Basis','charge_basis',['shipment','w_m','cbm','rt','hbl','container','package','other'],'shipment')+field('Quantity','quantity','1','number')+select('Currency','currency_code',['INR','USD','EUR','CNY','GBP'],'INR')+field('Rate','rate','0','number')+select('Charge side','charge_side',['customer','vendor'],'customer')+select('Billing status','billing_status',['unbilled','invoiced','paid','waived'],'unbilled')+'</div><button class="btn" type="submit">Add charge</button></form><div class="table-wrap"><table><thead><tr><th>CHARGE</th><th>BASIS</th><th>QTY × RATE</th><th>AMOUNT</th><th>SIDE</th><th>BILLING</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></article></section>',
    'import-lcl');
   bindShell();
@@ -269,6 +272,28 @@ async function renderImportLclDetail(id) {
    const {error}=await supabase.from('import_lcl_milestones').insert({company_id:companyId,shipment_id:id,milestone_code:d.milestone_code,milestone_at:d.milestone_at?new Date(d.milestone_at).toISOString():new Date().toISOString(),location:d.location||null,notes:d.notes||null});
    if(error){alert(error.message);return;}await renderImportLclDetail(id);
   });
+  document.querySelector('#document-form').addEventListener('submit',async e=>{
+   e.preventDefault();const form=e.currentTarget,file=form.querySelector('input[name="document_file"]').files[0],out=document.querySelector('#document-message'),button=form.querySelector('button[type=submit');
+   if(!file){out.innerHTML=message('Choose a document to upload.');return;}
+   const allowed=['application/pdf','image/jpeg','image/png','image/webp','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+   if(!allowed.includes(file.type)||file.size>25*1024*1024){out.innerHTML=message('Unsupported file type or file exceeds 25 MB.');return;}
+   const d=Object.fromEntries(new FormData(form).entries()),safeName=file.name.replace(/[^a-zA-Z0-9._-]/g,'_'),path=companyId+'/'+id+'/'+crypto.randomUUID()+'-'+safeName;
+   button.disabled=true;button.textContent='Uploading…';
+   const {error:uploadError}=await supabase.storage.from('import-lcl-documents').upload(path,file,{contentType:file.type,upsert:false});
+   if(uploadError){out.innerHTML=message(uploadError.message);button.disabled=false;button.textContent='Upload document →';return;}
+   const {error:metaError}=await supabase.from('import_lcl_documents').insert({company_id:companyId,shipment_id:id,document_type:d.document_type,document_number:d.document_number||null,file_name:file.name,storage_path:path,mime_type:file.type,file_size:file.size,remarks:d.document_remarks||null});
+   if(metaError){await supabase.storage.from('import-lcl-documents').remove([path]);out.innerHTML=message(metaError.message);button.disabled=false;button.textContent='Upload document →';return;}
+   await renderImportLclDetail(id);
+  });
+  document.querySelectorAll('.doc-download').forEach(button=>button.addEventListener('click',async()=>{
+   button.disabled=true;const {data,error}=await supabase.storage.from('import-lcl-documents').createSignedUrl(button.dataset.path,60);
+   if(error){alert(error.message);button.disabled=false;return;}window.open(data.signedUrl,'_blank','noopener');button.disabled=false;
+  }));
+  document.querySelectorAll('.doc-status').forEach(selectEl=>selectEl.addEventListener('change',async()=>{
+   const status=selectEl.value,update={status,verified_by:status==='verified'?currentUser.id:null,verified_at:status==='verified'?new Date().toISOString():null};
+   selectEl.disabled=true;const {error}=await supabase.from('import_lcl_documents').update(update).eq('id',selectEl.dataset.id).eq('company_id',companyId);
+   if(error){alert(error.message);selectEl.disabled=false;return;}await renderImportLclDetail(id);
+  }));
   document.querySelector('#charge-form').addEventListener('submit',async e=>{
    e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());
    const {error}=await supabase.from('import_lcl_charges').insert({company_id:companyId,shipment_id:id,charge_code:d.charge_code.trim(),description:d.description.trim(),charge_basis:d.charge_basis,quantity:Number(d.quantity),currency_code:d.currency_code,rate:Number(d.rate),charge_side:d.charge_side,billing_status:d.billing_status});
