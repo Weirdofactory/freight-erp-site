@@ -382,7 +382,9 @@ async function renderImportLclBilling(id) {
     ?(finalExists?'<span class="muted">Final invoice created</span>':'<button type="button" class="btn invoice-copy-final" data-id="'+esc(i.id)+'">Copy to Final Tax Invoice</button>'):'';
    const deleteButton=i.invoice_type==='proforma'&&i.status==='draft'
     ?'<button type="button" class="btn secondary invoice-delete" data-id="'+esc(i.id)+'">Delete Draft</button>':'';
-   return '<tr><td><strong>'+esc(i.invoice_no||'Draft')+'</strong><br>'+esc(i.invoice_type==='proforma'?'Proforma Invoice':'Tax Invoice')+(i.source_invoice_id?'<br><small>Copied from Proforma</small>':'')+'</td><td>'+esc(i.invoice_date)+'</td><td>'+esc(i.status)+'</td><td>'+money(i.total_amount,i.currency_code)+'</td><td><button type="button" class="btn secondary invoice-preview" data-id="'+esc(i.id)+'">Preview / Print</button> '+(i.status==='draft'?'<button type="button" class="btn invoice-issue" data-id="'+esc(i.id)+'">Issue</button>':'')+' '+copyButton+' '+deleteButton+'</td></tr>';
+   const cancelButton=i.invoice_type==='proforma'&&i.status==='issued'
+    ?'<button type="button" class="btn secondary invoice-cancel-proforma" data-id="'+esc(i.id)+'">Cancel Proforma</button>':'';
+   return '<tr><td><strong>'+esc(i.invoice_no||'Draft')+'</strong><br>'+esc(i.invoice_type==='proforma'?'Proforma Invoice':'Tax Invoice')+(i.source_invoice_id?'<br><small>Copied from Proforma</small>':'')+'</td><td>'+esc(i.invoice_date)+'</td><td>'+esc(i.status)+'</td><td>'+money(i.total_amount,i.currency_code)+'</td><td><button type="button" class="btn secondary invoice-preview" data-id="'+esc(i.id)+'">Preview / Print</button> '+(i.status==='draft'?'<button type="button" class="btn invoice-issue" data-id="'+esc(i.id)+'">Issue</button>':'')+' '+copyButton+' '+deleteButton+' '+cancelButton+'</td></tr>';
   }).join('')||'<tr><td colspan="5" class="empty">No invoices created for this shipment.</td></tr>';
   root.innerHTML=shell(
    '<section class="heading"><div class="eyebrow">IMPORT LCL / BILLING</div><div class="module-heading"><div><h1>Billing · '+esc(shipment.shipment_no)+'</h1><p class="muted">'+esc(shipment.hbl_no||'HBL pending')+' · '+esc(shipment.consignee_name||'Consignee pending')+'</p></div><button id="billing-back" class="btn secondary" type="button">← Shipment detail</button></div></section>'+
@@ -437,6 +439,13 @@ async function renderImportLclBilling(id) {
    button.disabled=true;button.textContent='Deleting…';
    const {error}=await supabase.from('import_lcl_invoices').delete().eq('id',button.dataset.id).eq('company_id',companyId).eq('invoice_type','proforma').eq('status','draft');
    if(error){alert(error.message);button.disabled=false;button.textContent='Delete Draft';return;}
+   await renderImportLclBilling(id);
+  }));
+  document.querySelectorAll('.invoice-cancel-proforma').forEach(button=>button.addEventListener('click',async()=>{
+   if(!confirm('Cancel this issued proforma? It will remain in the records with Cancelled status.'))return;
+   button.disabled=true;button.textContent='Cancelling…';
+   const {error}=await supabase.rpc('cancel_import_lcl_proforma',{p_invoice_id:button.dataset.id});
+   if(error){alert(error.message);button.disabled=false;button.textContent='Cancel Proforma';return;}
    await renderImportLclBilling(id);
   }));
   document.querySelectorAll('.invoice-copy-final').forEach(button=>button.addEventListener('click',async()=>{
