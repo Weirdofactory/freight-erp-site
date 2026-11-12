@@ -455,7 +455,9 @@ async function renderImportLclBilling(id) {
    '</div><div class="field"><label>Billing address</label><textarea name="bill_to_address" rows="2">'+esc(shipment.consignee_address||'')+'</textarea></div>'+
    '<div class="field"><label>Customer charges to include</label><div class="table-wrap"><table><thead><tr><th>SELECT</th><th>CHARGE</th><th>SIDE</th><th>QTY × RATE</th><th>AMOUNT</th><th>STATUS</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></div>'+
    '<div id="billing-message" aria-live="polite"></div><button class="btn" type="submit" '+(!available.length?'disabled':'')+'>Create invoice draft →</button></form></article></section>'+
-   '<section class="section"><h2>Invoices for this shipment</h2><article class="panel table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>STATUS</th><th>TOTAL</th><th>ACTION</th></tr></thead><tbody>'+invoiceRows+'</tbody></table></article></section>' , 'billing'\n  );\n  bindShell();
+   '<section class="section"><h2>Invoices for this shipment</h2><article class="panel table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>STATUS</th><th>TOTAL</th><th>ACTION</th></tr></thead><tbody>'+invoiceRows+'</tbody></table></article></section>' , 'billing'
+  );
+  bindShell();
   document.querySelector('#billing-back').onclick=()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id));
   const currencySelect=document.querySelector('[name="currency_code"]');
   currencySelect.addEventListener('change',()=>document.querySelectorAll('.bill-charge-check').forEach(c=>{c.disabled=c.dataset.currency!==currencySelect.value;c.checked=false;}));
