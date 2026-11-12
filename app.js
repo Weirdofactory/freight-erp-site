@@ -256,7 +256,7 @@ async function renderImportLclDetail(id) {
    '<section class="section"><h2>Shipment documents</h2><article class="panel"><form id="document-form"><div class="form-grid">'+select('Document type','document_type',['hbl','mbl','commercial_invoice','packing_list','arrival_notice','delivery_order','customs_document','delivery_proof','photo','other'],'hbl')+field('Document number','document_number','')+'<div class="field"><label>Choose file * (PDF, image, Word or Excel; max 25 MB)</label><input name="document_file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx" required></div>'+field('Remarks','document_remarks','')+'</div><div id="document-message" aria-live="polite"></div><button class="btn" type="submit">Upload document →</button></form><div class="table-wrap"><table><thead><tr><th>DOCUMENT</th><th>NUMBER</th><th>SIZE</th><th>STATUS</th><th>FILE</th></tr></thead><tbody>'+docRows+'</tbody></table></div></article></section>'+
    '<section class="section"><h2>Audit history</h2><article class="panel"><div class="timeline">'+auditHtml+'</div></article></section>'+
    '<section class="section"><div class="module-heading"><div><h2>Billing & invoices</h2><p class="muted">Prepare a Proforma Invoice or GST Tax Invoice from customer-side shipment charges.</p></div><button id="open-billing" class="btn" type="button">Open billing →</button></div></section>'+
-   '<section class="section"><h2>Shipment charges</h2><article class="panel"><form id="charge-form"><input type="hidden" name="charge_id" value=""><div class="form-grid">'+field('Charge code *','charge_code','')+field('Description *','description','')+select('Basis','charge_basis',['shipment','w_m','cbm','rt','hbl','container','package','other'],'shipment')+field('Quantity','quantity','1','number')+select('Currency','currency_code',['INR','USD','EUR','CNY','GBP'],'INR')+field('Rate','rate','0','number')+select('Charge side','charge_side',['customer','vendor'],'customer')+field('Remarks','remarks','')+'</div><div id="charge-message" aria-live="polite"></div><button id="charge-submit" class="btn" type="submit">Add charge</button> <button id="charge-cancel" class="btn secondary" type="button" hidden>Cancel edit</button></form><div class="table-wrap"><table><thead><tr><th>CHARGE</th><th>BASIS</th><th>QTY × RATE</th><th>AMOUNT</th><th>SIDE</th><th>BILLING</th><th>ACTIONS</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></article></section>',
+   '<section class="section"><h2>Shipment charges</h2><article class="panel"><form id="charge-form"><input type="hidden" name="charge_id" value=""><div class="form-grid">'+field('Charge code *','charge_code','')+field('Description *','description','')+field('SAC code','sac_code','')+select('Basis','charge_basis',['shipment','w_m','cbm','rt','hbl','container','package','other'],'shipment')+field('Quantity','quantity','1','number')+select('Currency','currency_code',['INR','USD','EUR','CNY','GBP'],'INR')+field('Rate','rate','0','number')+select('Charge side','charge_side',['customer','vendor'],'customer')+field('Remarks','remarks','')+'</div><div id="charge-message" aria-live="polite"></div><button id="charge-submit" class="btn" type="submit">Add charge</button> <button id="charge-cancel" class="btn secondary" type="button" hidden>Cancel edit</button></form><div class="table-wrap"><table><thead><tr><th>CHARGE</th><th>BASIS</th><th>QTY × RATE</th><th>AMOUNT</th><th>SIDE</th><th>BILLING</th><th>ACTIONS</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></article></section>',
    'import-lcl');
   bindShell();
   document.querySelector('#back-lcl').onclick=()=>setRoute('import-lcl');
@@ -324,7 +324,7 @@ async function renderImportLclDetail(id) {
    const charge=charges.find(x=>x.id===button.dataset.id);if(!charge)return;
    if(charge.billing_status!=='unbilled'){alert('This charge is locked because it has been invoiced or paid.');return;}
    chargeForm.elements.charge_id.value=charge.id;
-   ['charge_code','description','charge_basis','quantity','currency_code','rate','charge_side','remarks'].forEach(k=>{chargeForm.elements[k].value=charge[k]??'';});
+   ['charge_code','description','sac_code','charge_basis','quantity','currency_code','rate','charge_side','remarks'].forEach(k=>{chargeForm.elements[k].value=charge[k]??'';});
    document.querySelector('#charge-submit').textContent='Save charge changes';document.querySelector('#charge-cancel').hidden=false;chargeForm.scrollIntoView({behavior:'smooth',block:'center'});
   }));
   document.querySelectorAll('.charge-delete').forEach(button=>button.addEventListener('click',async()=>{
@@ -337,7 +337,7 @@ async function renderImportLclDetail(id) {
    e.preventDefault();const d=Object.fromEntries(new FormData(chargeForm).entries()),chargeId=d.charge_id;
    const quantity=Number(d.quantity),rate=Number(d.rate);
    if(!d.charge_code.trim()||!d.description.trim()||!Number.isFinite(quantity)||!Number.isFinite(rate)||quantity<0||rate<0){chargeOut.innerHTML=message('Enter a charge code, description, and valid non-negative quantity and rate.');return;}
-   const payload={charge_code:d.charge_code.trim(),description:d.description.trim(),charge_basis:d.charge_basis,quantity,currency_code:d.currency_code,rate,charge_side:d.charge_side,remarks:d.remarks||null};
+   const payload={charge_code:d.charge_code.trim(),description:d.description.trim(),sac_code:d.sac_code.trim()||null,charge_basis:d.charge_basis,quantity,currency_code:d.currency_code,rate,charge_side:d.charge_side,remarks:d.remarks||null};
    const submit=document.querySelector('#charge-submit');submit.disabled=true;submit.textContent=chargeId?'Saving…':'Adding…';
    const result=chargeId
     ? await supabase.from('import_lcl_charges').update(payload).eq('id',chargeId).eq('company_id',companyId)
@@ -407,8 +407,8 @@ async function renderImportLclBilling(id) {
    e.preventDefault();const form=e.currentTarget,d=Object.fromEntries(new FormData(form).entries());
    const selected=[...form.querySelectorAll('.bill-charge-check:checked')].map(x=>x.value);
    if(!selected.length){document.querySelector('#billing-message').innerHTML=message('Select at least one unbilled customer charge.');return;}
-   if(d.tax_treatment==='cgst_sgst'&&d.bill_to_state&&d.place_of_supply_state&&d.bill_to_state.trim().toLowerCase()!==d.place_of_supply_state.trim().toLowerCase()){
-    document.querySelector('#billing-message').innerHTML=message('Billing state and place of supply differ. Please verify whether IGST applies.');return;
+   if(d.tax_treatment==='cgst_sgst'&&branch.state_region&&d.place_of_supply_state&&branch.state_region.trim().toLowerCase()!==d.place_of_supply_state.trim().toLowerCase()){
+    document.querySelector('#billing-message').innerHTML=message('The place of supply differs from the supplier branch state. Please select IGST or verify the correct GST treatment.');return;
    }
    const payload={company_id:companyId,branch_id:shipment.branch_id,shipment_id:id,invoice_type:d.invoice_type,invoice_date:d.invoice_date,due_date:d.due_date,
     bill_to_name:d.bill_to_name,bill_to_gstin:d.bill_to_gstin,bill_to_address:d.bill_to_address,bill_to_state:d.bill_to_state,
