@@ -165,7 +165,7 @@ async function renderImportLcl() {
       <section class="heading"><div class="eyebrow">IMPORT OPERATIONS / LCL</div><div class="module-heading"><div><h1>Import LCL</h1><p class="muted">Manage overseas pre-alerts through arrival, customs clearance and cargo delivery.</p></div><button id="new-import" class="btn">+ New Import Shipment</button></div></section>
       <section class="grid"><article class="stat"><small>TOTAL SHIPMENTS</small><strong>${(shipments||[]).length}</strong><span>Visible in this workspace</span></article><article class="stat"><small>IN TRANSIT</small><strong>${(shipments||[]).filter(s=>s.status==='in_transit').length}</strong><span>Awaiting arrival</span></article><article class="stat"><small>ARRIVED</small><strong>${(shipments||[]).filter(s=>['arrived','destuffed'].includes(s.status)).length}</strong><span>At destination / CFS</span></article><article class="stat"><small>DELIVERY PENDING</small><strong>${(shipments||[]).filter(s=>!['delivered','closed','cancelled'].includes(s.status)).length}</strong><span>Open shipments</span></article></section>
       <section class="section"><div class="module-toolbar"><input id="lcl-search" class="search-input" placeholder="Search shipment / HBL / MBL / agent…"><select id="lcl-status" class="filter-select"><option value="">All statuses</option><option value="pre_alert">Pre-alert</option><option value="in_transit">In transit</option><option value="arrived">Arrived</option><option value="destuffed">Destuffed</option><option value="customs_hold">Customs hold</option><option value="customs_cleared">Customs cleared</option><option value="ready_for_delivery">Ready for delivery</option><option value="delivered">Delivered</option><option value="closed">Closed</option></select></div>
-      <article class="panel table-wrap"><table><thead><tr><th>SHIPMENT / HBL</th><th>AGENT</th><th>ORIGIN → DESTINATION</th><th>VESSEL / VOYAGE</th><th>PACKAGES</th><th>CBM</th><th>ETA</th><th>STATUS</th></tr></thead><tbody id="lcl-rows">${(shipments||[]).map(s=>`<tr data-search="${esc([s.shipment_no,s.hbl_no,s.mbl_no,s.agent_name,s.origin_port,s.destination_port].join(' ').toLowerCase())}" data-status="${esc(s.status)}"><td><strong>${esc(s.shipment_no)}</strong><br><small>${esc(s.hbl_no||'HBL pending')}</small></td><td>${esc(s.agent_name||'—')}</td><td>${esc(s.origin_port||'—')} → ${esc(s.destination_port||'—')}</td><td>${esc(s.vessel_name||'—')}<br><small>${esc(s.voyage_no||'')}</small></td><td>${Number(s.package_count||0)} ${esc(s.package_type||'')}</td><td>${Number(s.volume_cbm||0).toFixed(3)}</td><td>${esc(s.eta||'—')}</td><td><span class="status-pill">${esc(statusLabel(s.status))}</span></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No import LCL shipments yet. Select “New Import Shipment” to register your first pre-alert.</td></tr>'}</tbody></table></article></section>
+      <article class="panel table-wrap"><table><thead><tr><th>SHIPMENT / HBL</th><th>AGENT</th><th>ORIGIN → DESTINATION</th><th>VESSEL / VOYAGE</th><th>PACKAGES</th><th>CBM</th><th>ETA</th><th>STATUS</th></tr></thead><tbody id="lcl-rows">${(shipments||[]).map(s=>`<tr class="clickable-row" data-id="${esc(s.id)}" data-search="${esc([s.shipment_no,s.hbl_no,s.mbl_no,s.agent_name,s.origin_port,s.destination_port].join(' ').toLowerCase())}" data-status="${esc(s.status)}" title="Open shipment operations"><td><strong>${esc(s.shipment_no)}</strong><br><small>${esc(s.hbl_no||'HBL pending')}</small></td><td>${esc(s.agent_name||'—')}</td><td>${esc(s.origin_port||'—')} → ${esc(s.destination_port||'—')}</td><td>${esc(s.vessel_name||'—')}<br><small>${esc(s.voyage_no||'')}</small></td><td>${Number(s.package_count||0)} ${esc(s.package_type||'')}</td><td>${Number(s.volume_cbm||0).toFixed(3)}</td><td>${esc(s.eta||'—')}</td><td><span class="status-pill">${esc(statusLabel(s.status))}</span></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No import LCL shipments yet. Select “New Import Shipment” to register your first pre-alert.</td></tr>'}</tbody></table></article></section>
       <section id="lcl-form-wrap" class="section" hidden><article class="panel"><div class="module-heading"><div><h2>Register Import LCL Shipment</h2><p class="muted">Create a shipment record from the overseas pre-alert.</p></div><button id="cancel-import" class="btn secondary" type="button">Close</button></div>
       <form id="lcl-create-form"><div class="form-grid">
         <div class="field"><label>Branch *</label><select name="branch_id" required>${branchOptions}</select></div>
@@ -196,6 +196,7 @@ async function renderImportLcl() {
     `, 'import-lcl');
     bindShell();
     const rows = [...document.querySelectorAll('#lcl-rows tr[data-search]')];
+    rows.forEach(row=>row.addEventListener('click',()=>setRoute('import-lcl-detail?id='+encodeURIComponent(row.dataset.id))));
     const filterRows = () => { const q=document.querySelector('#lcl-search').value.toLowerCase(); const st=document.querySelector('#lcl-status').value; rows.forEach(row=>{row.hidden=!(row.dataset.search.includes(q)&&(!st||row.dataset.status===st));}); };
     document.querySelector('#lcl-search').addEventListener('input',filterRows);
     document.querySelector('#lcl-status').addEventListener('change',filterRows);
@@ -212,6 +213,70 @@ async function renderImportLcl() {
       await renderImportLcl();
     });
   } catch(error) { root.innerHTML=shell(`<section class="heading"><h1>Import LCL unavailable</h1>${message(error.message||'Unable to load Import LCL.')}</section>`,'import-lcl');bindShell(); }
+}
+
+
+async function renderImportLclDetail(id) {
+ root.innerHTML='<main class="loading">Loading shipment…</main>';
+ try {
+  const memberships=await loadMemberships(), membership=memberships[0];
+  if(!membership) throw new Error('No active company membership.');
+  const companyId=membership.company_id;
+  const qs=await Promise.all([
+   supabase.from('import_lcl_shipments').select('*').eq('id',id).eq('company_id',companyId).single(),
+   supabase.from('import_lcl_containers').select('*').eq('shipment_id',id).eq('company_id',companyId).order('created_at'),
+   supabase.from('import_lcl_milestones').select('*').eq('shipment_id',id).eq('company_id',companyId).order('milestone_at',{ascending:false}),
+   supabase.from('import_lcl_charges').select('*').eq('shipment_id',id).eq('company_id',companyId).order('created_at',{ascending:false})
+  ]);
+  qs.forEach(x=>{if(x.error)throw x.error;});
+  const s=qs[0].data, containers=qs[1].data||[], milestones=qs[2].data||[], charges=qs[3].data||[];
+  const nice=x=>String(x||'').replaceAll('_',' ').replace(/\\b\\w/g,a=>a.toUpperCase());
+  const fmt=x=>x?new Date(x).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'—';
+  const field=(label,name,value,type='text')=>'<div class="field"><label>'+label+'</label><input name="'+name+'" type="'+type+'" value="'+esc(value||'')+'"></div>';
+  const select=(label,name,values,current)=>'<div class="field"><label>'+label+'</label><select name="'+name+'">'+values.map(v=>'<option value="'+v+'" '+(v===current?'selected':'')+'>'+nice(v)+'</option>').join('')+'</select></div>';
+  const statuses=['pre_alert','in_transit','arrived','destuffed','customs_hold','customs_cleared','ready_for_delivery','delivered','closed','cancelled'];
+  const codes=['pre_alert_received','documents_received','vessel_departed','vessel_arrived','arrival_notice_sent','cfs_received','destuffing_completed','customs_filed','customs_cleared','do_issued','cargo_delivered'];
+  const containerRows=containers.map(x=>'<tr><td>'+esc(x.container_no)+'</td><td>'+esc(x.container_size||'—')+'</td><td>'+esc(x.seal_no||'—')+'</td><td>'+esc(x.gross_weight_kg||'—')+'</td></tr>').join('')||'<tr><td colspan="4" class="empty">No containers added.</td></tr>';
+  const milestoneRows=milestones.map(x=>'<div class="timeline-item"><strong>'+esc(nice(x.milestone_code))+'</strong><span>'+esc(fmt(x.milestone_at))+'</span><p>'+esc(x.location||'')+(x.notes?' · '+esc(x.notes):'')+'</p></div>').join('')||'<div class="empty">No milestones recorded.</div>';
+  const chargeRows=charges.map(x=>'<tr><td>'+esc(x.charge_code)+'<br>'+esc(x.description)+'</td><td>'+esc(nice(x.charge_basis))+'</td><td>'+esc(x.quantity)+' × '+esc(x.rate)+' '+esc(x.currency_code)+'</td><td>'+esc(x.amount)+' '+esc(x.currency_code)+'</td><td>'+esc(nice(x.charge_side))+'</td><td>'+esc(nice(x.billing_status))+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">No charges entered.</td></tr>';
+  const ops=field('ATA','ata',s.ata,'date')+field('Arrival notice date','arrival_notice_date',s.arrival_notice_date,'date')+field('CFS name','cfs_name',s.cfs_name)+field('CFS arrival','cfs_arrival_at',s.cfs_arrival_at?new Date(s.cfs_arrival_at).toISOString().slice(0,16):'','datetime-local')+field('Destuffed at','destuffed_at',s.destuffed_at?new Date(s.destuffed_at).toISOString().slice(0,16):'','datetime-local')+select('Shipment status','status',statuses,s.status)+select('Customs status','customs_status',['pending','filed','hold','exam','cleared'],s.customs_status)+select('Delivery status','delivery_status',['pending','do_issued','part_delivered','delivered'],s.delivery_status)+field('Remarks','remarks',s.remarks);
+  root.innerHTML=shell(
+   '<section class="heading"><div class="eyebrow">IMPORT LCL / SHIPMENT DETAIL</div><div class="module-heading"><div><h1>'+esc(s.shipment_no)+'</h1><p class="muted">'+esc(s.hbl_no||'HBL pending')+' · '+esc(s.agent_name||'')+' · '+esc(nice(s.status))+'</p></div><button id="back-lcl" class="btn secondary" type="button">← Shipment list</button></div></section>'+
+   '<section class="grid"><article class="stat"><small>ROUTE</small><strong class="small-stat">'+esc(s.origin_port||'—')+' → '+esc(s.destination_port||'—')+'</strong></article><article class="stat"><small>VESSEL / VOYAGE</small><strong class="small-stat">'+esc(s.vessel_name||'—')+'</strong><span>'+esc(s.voyage_no||'')+'</span></article><article class="stat"><small>ETA / ATA</small><strong class="small-stat">'+esc(s.eta||'—')+'</strong><span>'+esc(s.ata||'—')+'</span></article><article class="stat"><small>CARGO</small><strong>'+Number(s.volume_cbm||0).toFixed(3)+' CBM</strong><span>'+Number(s.package_count||0)+' pkgs · '+Number(s.gross_weight_kg||0)+' kg</span></article></section>'+
+   '<section class="section"><h2>Arrival, CFS, customs & delivery</h2><article class="panel"><form id="ops-form"><div class="form-grid">'+ops+'</div><div id="ops-message"></div><button class="btn" type="submit">Save operations →</button></form></article></section>'+
+   '<section class="section"><h2>Container / consol details</h2><article class="panel"><form id="container-form"><div class="form-grid">'+field('Container number *','container_no','')+select('Size','container_size',['20','40','40 HQ','45'],'40 HQ')+field('Seal number','seal_no','')+field('Gross weight kg','gross_weight_kg','','number')+'</div><button class="btn" type="submit">Add container</button></form><div class="table-wrap"><table><thead><tr><th>CONTAINER</th><th>SIZE</th><th>SEAL</th><th>WEIGHT</th></tr></thead><tbody>'+containerRows+'</tbody></table></div></article></section>'+
+   '<section class="section"><h2>Shipment milestones</h2><article class="panel"><form id="milestone-form"><div class="form-grid">'+select('Milestone','milestone_code',codes,'vessel_arrived')+field('Date & time','milestone_at',new Date().toISOString().slice(0,16),'datetime-local')+field('Location','location','')+field('Notes','notes','')+'</div><button class="btn" type="submit">Record milestone</button></form><div class="timeline">'+milestoneRows+'</div></article></section>'+
+   '<section class="section"><h2>Shipment charges</h2><article class="panel"><form id="charge-form"><div class="form-grid">'+field('Charge code *','charge_code','')+field('Description *','description','')+select('Basis','charge_basis',['shipment','w_m','cbm','rt','hbl','container','package','other'],'shipment')+field('Quantity','quantity','1','number')+select('Currency','currency_code',['INR','USD','EUR','CNY','GBP'],'INR')+field('Rate','rate','0','number')+select('Charge side','charge_side',['customer','vendor'],'customer')+select('Billing status','billing_status',['unbilled','invoiced','paid','waived'],'unbilled')+'</div><button class="btn" type="submit">Add charge</button></form><div class="table-wrap"><table><thead><tr><th>CHARGE</th><th>BASIS</th><th>QTY × RATE</th><th>AMOUNT</th><th>SIDE</th><th>BILLING</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></article></section>',
+   'import-lcl');
+  bindShell();
+  document.querySelector('#back-lcl').onclick=()=>setRoute('import-lcl');
+  document.querySelector('#ops-form').addEventListener('submit',async e=>{
+   e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries()),p={};
+   ['ata','arrival_notice_date','cfs_name','remarks','status','customs_status','delivery_status'].forEach(k=>p[k]=d[k]||null);
+   ['cfs_arrival_at','destuffed_at'].forEach(k=>p[k]=d[k]?new Date(d[k]).toISOString():null);
+   p.updated_at=new Date().toISOString();
+   const {error}=await supabase.from('import_lcl_shipments').update(p).eq('id',id).eq('company_id',companyId);
+   if(error){document.querySelector('#ops-message').innerHTML=message(error.message);return;}await renderImportLclDetail(id);
+  });
+  document.querySelector('#container-form').addEventListener('submit',async e=>{
+   e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());
+   const {error}=await supabase.from('import_lcl_containers').insert({company_id:companyId,shipment_id:id,container_no:d.container_no.trim(),container_size:d.container_size||null,seal_no:d.seal_no||null,gross_weight_kg:d.gross_weight_kg?Number(d.gross_weight_kg):null});
+   if(error){alert(error.message);return;}await renderImportLclDetail(id);
+  });
+  document.querySelector('#milestone-form').addEventListener('submit',async e=>{
+   e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());
+   const {error}=await supabase.from('import_lcl_milestones').insert({company_id:companyId,shipment_id:id,milestone_code:d.milestone_code,milestone_at:d.milestone_at?new Date(d.milestone_at).toISOString():new Date().toISOString(),location:d.location||null,notes:d.notes||null});
+   if(error){alert(error.message);return;}await renderImportLclDetail(id);
+  });
+  document.querySelector('#charge-form').addEventListener('submit',async e=>{
+   e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());
+   const {error}=await supabase.from('import_lcl_charges').insert({company_id:companyId,shipment_id:id,charge_code:d.charge_code.trim(),description:d.description.trim(),charge_basis:d.charge_basis,quantity:Number(d.quantity),currency_code:d.currency_code,rate:Number(d.rate),charge_side:d.charge_side,billing_status:d.billing_status});
+   if(error){alert(error.message);return;}await renderImportLclDetail(id);
+  });
+ } catch(error) {
+  root.innerHTML=shell('<section class="heading"><h1>Shipment detail unavailable</h1>'+message(error.message||'Unable to load shipment.')+'<button id="back-lcl-error" class="btn secondary">← Back</button></section>','import-lcl');
+  bindShell();document.querySelector('#back-lcl-error')?.addEventListener('click',()=>setRoute('import-lcl'));
+ }
 }
 
 async function renderPlatform() {
@@ -265,6 +330,7 @@ async function navigate() {
   if (page === "platform") { await renderPlatform(); return; }
   if (page === "company") { await renderCompany(); return; }
   if (page === "import-lcl") { await renderImportLcl(); return; }
+  if (page === "import-lcl-detail") { const id=new URLSearchParams(location.hash.split('?')[1]||'').get('id'); if(id){await renderImportLclDetail(id);return;} await renderImportLcl(); return; }
   await renderDashboard();
 }
 
