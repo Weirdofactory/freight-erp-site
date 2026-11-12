@@ -460,7 +460,9 @@ async function renderImportLclBilling(id) {
   bindShell();
   document.querySelector('#billing-back').onclick=()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id));
   const currencySelect=document.querySelector('[name="currency_code"]');
-  currencySelect.addEventListener('change',()=>document.querySelectorAll('.bill-charge-check').forEach(c=>{c.disabled=c.dataset.currency!==currencySelect.value;c.checked=false;}));
+  const syncChargeCurrency=()=>document.querySelectorAll('.bill-charge-check').forEach(c=>{if(c.dataset.currency!==currencySelect.value)c.checked=false;c.disabled=c.dataset.currency!==currencySelect.value;});
+  currencySelect.addEventListener('change',syncChargeCurrency);
+  syncChargeCurrency();
   document.querySelector('#billing-form').addEventListener('submit',async e=>{
    e.preventDefault();const form=e.currentTarget,d=Object.fromEntries(new FormData(form).entries());
    const selected=[...form.querySelectorAll('.bill-charge-check:checked')].map(x=>x.value);
