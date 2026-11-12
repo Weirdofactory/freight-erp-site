@@ -113,6 +113,7 @@ function shell(content, active = "dashboard") {
   const email = currentUser?.email || "Signed-in user";
   return `<div class="app-shell"><aside class="sidebar"><div class="brand">FREIGHT<span> ERP</span></div>
     <nav class="nav"><div class="nav-label">WORKSPACE</div><a class="${active === "dashboard" ? "active" : ""}" href="#/dashboard">Overview</a>
+    <div class="nav-label">OPERATIONS</div><a class="${active === "import-lcl" ? "active" : ""}" href="#/import-lcl">Import LCL</a>
     <div class="nav-label">ADMINISTRATION</div><a class="${active === "company" ? "active" : ""}" href="#/company">Company management</a>
     <a class="${active === "platform" ? "active" : ""}" href="#/platform">Platform Super Admin</a></nav>
     <div class="sidebar-foot">${esc(email)}<br>Authenticated session</div></aside>
@@ -133,14 +134,84 @@ async function renderDashboard() {
       <article class="stat"><small>TEAM MEMBERS</small><strong>—</strong><span>User administration</span></article>
       <article class="stat"><small>DATA SECURITY</small><strong>RLS</strong><span>Tenant-scoped policies</span></article></section>
       <section class="section"><h2>Current workspace</h2><article class="panel"><div class="row"><span>Company</span><strong>${esc(company)}</strong></div><div class="row"><span>Signed-in account</span><strong>${esc(currentUser.email)}</strong></div><div class="row"><span>Assigned role</span><strong>${esc(role)}</strong></div><div class="row"><span>Default timezone</span><strong>Asia/Kolkata</strong></div></article></section>
-      <section class="section"><h2>Foundation modules</h2><article class="panel"><p class="muted">Company and branch administration, user access, roles and permissions are being connected to the protected backend.</p><button id="open-company" class="btn">Open company management →</button></article></section>
+      <section class="section"><h2>Operations modules</h2><article class="panel"><h3>Import LCL</h3><p class="muted">Register overseas pre-alerts, track HBLs, vessels, arrival, CFS, customs and delivery.</p><button id="open-import-lcl" class="btn">Open Import LCL →</button></article></section>
+      <section class="section"><h2>Administration</h2><article class="panel"><p class="muted">Company and branch administration, user access and role permissions.</p><button id="open-company" class="btn secondary">Company management →</button></article></section>
     `);
     bindShell();
     document.querySelector("#open-company").addEventListener("click", () => setRoute("company"));
+    document.querySelector("#open-import-lcl").addEventListener("click", () => setRoute("import-lcl"));
   } catch (error) {
     root.innerHTML = shell(`<section class="heading"><h1>Workspace unavailable</h1>${message(error.message || "Could not load company memberships.")}<p class="muted">Check Supabase Row Level Security and your active company membership.</p></section>`);
     bindShell();
   }
+}
+
+async function renderImportLcl() {
+  root.innerHTML = '<main class="loading">Loading Import LCL operations…</main>';
+  try {
+    const memberships = await loadMemberships();
+    const membership = memberships[0];
+    if (!membership) throw new Error('Your account does not have an active company membership.');
+    const companyId = membership.company_id;
+    const [{ data: branches, error: branchError }, { data: shipments, error: shipmentError }] = await Promise.all([
+      supabase.from('branches').select('id,name,branch_code').eq('status','active').order('name'),
+      supabase.from('import_lcl_shipments').select('id,shipment_no,status,agent_name,origin_port,destination_port,vessel_name,voyage_no,hbl_no,mbl_no,eta,package_count,package_type,gross_weight_kg,volume_cbm,customs_status,delivery_status,created_at').eq('company_id',companyId).order('created_at',{ascending:false}).limit(200)
+    ]);
+    if (branchError) throw branchError;
+    if (shipmentError) throw shipmentError;
+    const branchOptions = (branches || []).map(b => `<option value="${esc(b.id)}">${esc(b.name)} (${esc(b.branch_code)})</option>`).join('');
+    const statusLabel = s => ({pre_alert:'Pre-alert',in_transit:'In transit',arrived:'Arrived',destuffed:'Destuffed',customs_hold:'Customs hold',customs_cleared:'Customs cleared',ready_for_delivery:'Ready for delivery',delivered:'Delivered',closed:'Closed',cancelled:'Cancelled'}[s] || s);
+    root.innerHTML = shell(`
+      <section class="heading"><div class="eyebrow">IMPORT OPERATIONS / LCL</div><div class="module-heading"><div><h1>Import LCL</h1><p class="muted">Manage overseas pre-alerts through arrival, customs clearance and cargo delivery.</p></div><button id="new-import" class="btn">+ New Import Shipment</button></div></section>
+      <section class="grid"><article class="stat"><small>TOTAL SHIPMENTS</small><strong>${(shipments||[]).length}</strong><span>Visible in this workspace</span></article><article class="stat"><small>IN TRANSIT</small><strong>${(shipments||[]).filter(s=>s.status==='in_transit').length}</strong><span>Awaiting arrival</span></article><article class="stat"><small>ARRIVED</small><strong>${(shipments||[]).filter(s=>['arrived','destuffed'].includes(s.status)).length}</strong><span>At destination / CFS</span></article><article class="stat"><small>DELIVERY PENDING</small><strong>${(shipments||[]).filter(s=>!['delivered','closed','cancelled'].includes(s.status)).length}</strong><span>Open shipments</span></article></section>
+      <section class="section"><div class="module-toolbar"><input id="lcl-search" class="search-input" placeholder="Search shipment / HBL / MBL / agent…"><select id="lcl-status" class="filter-select"><option value="">All statuses</option><option value="pre_alert">Pre-alert</option><option value="in_transit">In transit</option><option value="arrived">Arrived</option><option value="destuffed">Destuffed</option><option value="customs_hold">Customs hold</option><option value="customs_cleared">Customs cleared</option><option value="ready_for_delivery">Ready for delivery</option><option value="delivered">Delivered</option><option value="closed">Closed</option></select></div>
+      <article class="panel table-wrap"><table><thead><tr><th>SHIPMENT / HBL</th><th>AGENT</th><th>ORIGIN → DESTINATION</th><th>VESSEL / VOYAGE</th><th>PACKAGES</th><th>CBM</th><th>ETA</th><th>STATUS</th></tr></thead><tbody id="lcl-rows">${(shipments||[]).map(s=>`<tr data-search="${esc([s.shipment_no,s.hbl_no,s.mbl_no,s.agent_name,s.origin_port,s.destination_port].join(' ').toLowerCase())}" data-status="${esc(s.status)}"><td><strong>${esc(s.shipment_no)}</strong><br><small>${esc(s.hbl_no||'HBL pending')}</small></td><td>${esc(s.agent_name||'—')}</td><td>${esc(s.origin_port||'—')} → ${esc(s.destination_port||'—')}</td><td>${esc(s.vessel_name||'—')}<br><small>${esc(s.voyage_no||'')}</small></td><td>${Number(s.package_count||0)} ${esc(s.package_type||'')}</td><td>${Number(s.volume_cbm||0).toFixed(3)}</td><td>${esc(s.eta||'—')}</td><td><span class="status-pill">${esc(statusLabel(s.status))}</span></td></tr>`).join('') || '<tr><td colspan="8" class="empty">No import LCL shipments yet. Select “New Import Shipment” to register your first pre-alert.</td></tr>'}</tbody></table></article></section>
+      <section id="lcl-form-wrap" class="section" hidden><article class="panel"><div class="module-heading"><div><h2>Register Import LCL Shipment</h2><p class="muted">Create a shipment record from the overseas pre-alert.</p></div><button id="cancel-import" class="btn secondary" type="button">Close</button></div>
+      <form id="lcl-create-form"><div class="form-grid">
+        <div class="field"><label>Branch *</label><select name="branch_id" required>${branchOptions}</select></div>
+        <div class="field"><label>Overseas agent *</label><input name="agent_name" required placeholder="Agent / co-loader name"></div>
+        <div class="field"><label>Agent reference</label><input name="agent_reference" placeholder="Agent file reference"></div>
+        <div class="field"><label>Agent email</label><input name="agent_email" type="email" placeholder="operations@agent.com"></div>
+        <div class="field"><label>Origin port *</label><input name="origin_port" required placeholder="Shanghai"></div>
+        <div class="field"><label>Destination port *</label><input name="destination_port" required value="Chennai"></div>
+        <div class="field"><label>Vessel name</label><input name="vessel_name"></div>
+        <div class="field"><label>Voyage number</label><input name="voyage_no"></div>
+        <div class="field"><label>MBL number</label><input name="mbl_no"></div>
+        <div class="field"><label>HBL number</label><input name="hbl_no"></div>
+        <div class="field"><label>Shipper name</label><input name="shipper_name"></div>
+        <div class="field"><label>Consignee name *</label><input name="consignee_name" required></div>
+        <div class="field"><label>Consignee email</label><input name="consignee_email" type="email"></div>
+        <div class="field"><label>Consignee phone</label><input name="consignee_phone"></div>
+        <div class="field"><label>Commodity</label><input name="commodity"></div>
+        <div class="field"><label>Packages</label><input name="package_count" type="number" min="0" value="0"></div>
+        <div class="field"><label>Package type</label><input name="package_type" placeholder="Cartons / pallets / drums"></div>
+        <div class="field"><label>Gross weight (kg)</label><input name="gross_weight_kg" type="number" min="0" step="0.001" value="0"></div>
+        <div class="field"><label>Volume (CBM)</label><input name="volume_cbm" type="number" min="0" step="0.0001" value="0"></div>
+        <div class="field"><label>Freight term</label><select name="freight_term"><option value="">Select</option><option value="prepaid">Prepaid</option><option value="collect">Collect</option></select></div>
+        <div class="field"><label>ETD</label><input name="etd" type="date"></div>
+        <div class="field"><label>ETA</label><input name="eta" type="date"></div>
+        <div class="field"><label>CFS name</label><input name="cfs_name"></div>
+        <div class="field"><label>Remarks</label><input name="remarks"></div>
+      </div><div id="lcl-form-message"></div><button class="btn" type="submit">Save Import Shipment →</button></form></article></section>
+    `, 'import-lcl');
+    bindShell();
+    const rows = [...document.querySelectorAll('#lcl-rows tr[data-search]')];
+    const filterRows = () => { const q=document.querySelector('#lcl-search').value.toLowerCase(); const st=document.querySelector('#lcl-status').value; rows.forEach(row=>{row.hidden=!(row.dataset.search.includes(q)&&(!st||row.dataset.status===st));}); };
+    document.querySelector('#lcl-search').addEventListener('input',filterRows);
+    document.querySelector('#lcl-status').addEventListener('change',filterRows);
+    document.querySelector('#new-import').addEventListener('click',()=>{document.querySelector('#lcl-form-wrap').hidden=false;document.querySelector('#lcl-form-wrap').scrollIntoView({behavior:'smooth'});});
+    document.querySelector('#cancel-import').addEventListener('click',()=>{document.querySelector('#lcl-form-wrap').hidden=true;});
+    document.querySelector('#lcl-create-form').addEventListener('submit',async e=>{
+      e.preventDefault(); const form=e.currentTarget; const data=Object.fromEntries(new FormData(form).entries()); const msg=document.querySelector('#lcl-form-message'); const submit=form.querySelector('button[type=submit]');
+      submit.disabled=true; submit.textContent='Saving shipment…';
+      const payload={company_id:companyId,branch_id:data.branch_id,agent_name:data.agent_name.trim(),agent_reference:data.agent_reference||null,agent_email:data.agent_email||null,origin_port:data.origin_port.trim(),destination_port:data.destination_port.trim(),vessel_name:data.vessel_name||null,voyage_no:data.voyage_no||null,mbl_no:data.mbl_no||null,hbl_no:data.hbl_no||null,shipper_name:data.shipper_name||null,consignee_name:data.consignee_name.trim(),consignee_email:data.consignee_email||null,consignee_phone:data.consignee_phone||null,commodity:data.commodity||null,package_count:Number(data.package_count||0),package_type:data.package_type||null,gross_weight_kg:Number(data.gross_weight_kg||0),volume_cbm:Number(data.volume_cbm||0),freight_term:data.freight_term||null,etd:data.etd||null,eta:data.eta||null,cfs_name:data.cfs_name||null,remarks:data.remarks||null};
+      const {data:created,error:createError}=await supabase.from('import_lcl_shipments').insert(payload).select('id,shipment_no').single();
+      if(createError){msg.innerHTML=message(createError.message||'Unable to save shipment. Check your role permissions and required fields.');submit.disabled=false;submit.textContent='Save Import Shipment →';return;}
+      await supabase.from('import_lcl_milestones').insert({company_id:companyId,shipment_id:created.id,milestone_code:'pre_alert_received',notes:'Shipment registered in Freight ERP'});
+      msg.innerHTML=message('Shipment '+created.shipment_no+' created successfully.','success');
+      await renderImportLcl();
+    });
+  } catch(error) { root.innerHTML=shell(`<section class="heading"><h1>Import LCL unavailable</h1>${message(error.message||'Unable to load Import LCL.')}</section>`,'import-lcl');bindShell(); }
 }
 
 async function renderPlatform() {
@@ -193,6 +264,7 @@ async function navigate() {
   if (!user) { renderLogin(); return; }
   if (page === "platform") { await renderPlatform(); return; }
   if (page === "company") { await renderCompany(); return; }
+  if (page === "import-lcl") { await renderImportLcl(); return; }
   await renderDashboard();
 }
 
