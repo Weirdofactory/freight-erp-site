@@ -440,12 +440,29 @@ async function renderImportLclBilling(id) {
    await renderImportLclBilling(id);
   }));
   document.querySelectorAll('.invoice-copy-final').forEach(button=>button.addEventListener('click',async()=>{
+   const source=invoices.find(x=>x.id===button.dataset.id);
+   if(!source)return;
+   const billToAddress=prompt('Enter customer billing address (required):',source.bill_to_address||'');
+   if(billToAddress===null)return;
+   const billToState=prompt('Enter customer billing state (required):',source.bill_to_state||'');
+   if(billToState===null)return;
+   const placeOfSupply=prompt('Enter place of supply state (required):',source.place_of_supply_state||billToState);
+   if(placeOfSupply===null)return;
+   const customerGstin=prompt('Enter customer GSTIN (leave blank if not registered):',source.bill_to_gstin||'');
+   if(customerGstin===null)return;
+   if(!billToAddress.trim()||!billToState.trim()||!placeOfSupply.trim()){alert('Billing address, billing state and place of supply are required for the tax invoice.');return;}
    if(!confirm('Copy this proforma into a new Final Tax Invoice draft? The original proforma will remain unchanged.'))return;
    button.disabled=true;button.textContent='Copying…';
    const {data,error}=await supabase.rpc('create_import_lcl_tax_invoice_from_proforma',{
     p_source_invoice_id:button.dataset.id,p_invoice_date:new Date().toISOString().slice(0,10),p_due_date:null
    });
    if(error){alert(error.message);button.disabled=false;button.textContent='Copy to Final Tax Invoice';return;}
+   const taxTreatment=source.tax_treatment==='no_tax'?'no_tax':(placeOfSupply.trim().toLowerCase()===String(branch.state_region||'').trim().toLowerCase()?'cgst_sgst':'igst');
+   const {error:updateError}=await supabase.from('import_lcl_invoices').update({
+    bill_to_address:billToAddress.trim(),bill_to_state:billToState.trim(),place_of_supply_state:placeOfSupply.trim(),
+    bill_to_gstin:customerGstin.trim()||null,tax_treatment:taxTreatment
+   }).eq('id',data).eq('company_id',companyId).eq('status','draft');
+   if(updateError){alert('Tax Invoice draft was created, but billing details could not be saved: '+updateError.message);}
    await renderImportLclBilling(id);
   }));
   document.querySelectorAll('.invoice-preview').forEach(button=>button.addEventListener('click',async()=>{
