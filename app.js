@@ -455,10 +455,7 @@ async function renderImportLclBilling(id) {
    '</div><div class="field"><label>Billing address</label><textarea name="bill_to_address" rows="2">'+esc(shipment.consignee_address||'')+'</textarea></div>'+
    '<div class="field"><label>Customer charges to include</label><div class="table-wrap"><table><thead><tr><th>SELECT</th><th>CHARGE</th><th>SIDE</th><th>QTY × RATE</th><th>AMOUNT</th><th>STATUS</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></div>'+
    '<div id="billing-message" aria-live="polite"></div><button class="btn" type="submit" '+(!available.length?'disabled':'')+'>Create invoice draft →</button></form></article></section>'+
-   '<section class="section"><h2>Invoices for this shipment</h2><article class="panel table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>STATUS</th><th>TOTAL</th><th>ACTION</th></tr></thead><tbody>'+invoiceRows+'</tbody></table></article></section>',
-   'import-lcl'
-  );
-  bindShell();
+   '<section class="section"><h2>Invoices for this shipment</h2><article class="panel table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>STATUS</th><th>TOTAL</th><th>ACTION</th></tr></thead><tbody>'+invoiceRows+'</tbody></table></article></section>' , 'billing'\n  );\n  bindShell();
   document.querySelector('#billing-back').onclick=()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id));
   const currencySelect=document.querySelector('[name="currency_code"]');
   currencySelect.addEventListener('change',()=>document.querySelectorAll('.bill-charge-check').forEach(c=>{c.disabled=c.dataset.currency!==currencySelect.value;c.checked=false;}));
@@ -498,29 +495,50 @@ async function renderImportLclBilling(id) {
    if(error){alert(error.message);button.disabled=false;button.textContent='Cancel Proforma';return;}
    await renderImportLclBilling(id);
   }));
-  document.querySelectorAll('.invoice-copy-final').forEach(button=>button.addEventListener('click',async()=>{
-   const source=invoices.find(x=>x.id===button.dataset.id);
-   if(!source)return;
-   const billToAddress=prompt('Enter customer billing address (required):',source.bill_to_address||'');
-   if(billToAddress===null)return;
-   const billToState=prompt('Enter customer billing state (required):',source.bill_to_state||'');
-   if(billToState===null)return;
-   const placeOfSupply=prompt('Enter place of supply state (required):',source.place_of_supply_state||billToState);
-   if(placeOfSupply===null)return;
-   const customerGstin=prompt('Enter customer GSTIN (leave blank if not registered):',source.bill_to_gstin||'');
-   if(customerGstin===null)return;
-   if(!billToAddress.trim()||!billToState.trim()||!placeOfSupply.trim()){alert('Billing address, billing state and place of supply are required for the tax invoice.');return;}
-   if(!confirm('Copy this proforma into a new Final Tax Invoice draft? The original proforma will remain unchanged.'))return;
-   button.disabled=true;button.textContent='Copying…';
-   const taxTreatment=source.tax_treatment==='no_tax'?'no_tax':(placeOfSupply.trim().toLowerCase()===String(branch.state_region||'').trim().toLowerCase()?'cgst_sgst':'igst');
-   const {error}=await supabase.rpc('create_import_lcl_tax_invoice_from_proforma',{
-    p_source_invoice_id:button.dataset.id,p_invoice_date:new Date().toISOString().slice(0,10),p_due_date:null,
-    p_overrides:{bill_to_address:billToAddress.trim(),bill_to_state:billToState.trim(),
-     place_of_supply_state:placeOfSupply.trim(),bill_to_gstin:customerGstin.trim(),tax_treatment:taxTreatment}
-   });
-   if(error){alert(error.message);button.disabled=false;button.textContent='Copy to Final Tax Invoice';return;}
-   await renderImportLclBilling(id);
+  let copySourceInvoice = null;
+  const copyModal=document.createElement('div');
+  copyModal.className='erp-modal-backdrop';copyModal.id='invoice-copy-modal';copyModal.hidden=true;
+  copyModal.innerHTML='<section class="erp-modal" role="dialog" aria-modal="true" aria-labelledby="invoice-copy-title"><header class="erp-modal-header"><div><div class="eyebrow">FINANCE / CONVERSION</div><h2 id="invoice-copy-title">Create final tax invoice</h2><p class="muted">Review customer registration and place-of-supply details before creating the draft.</p></div><button type="button" class="icon-button" id="invoice-copy-close" aria-label="Close">×</button></header><form id="invoice-copy-form"><div class="erp-modal-body"><div class="copy-source-strip"><span>FROM PROFORMA</span><strong id="copy-source-no">—</strong><small id="copy-source-total">—</small></div><div class="form-grid"><div class="field"><label>Invoice date *</label><input type="date" name="invoice_date" required></div><div class="field"><label>Due date</label><input type="date" name="due_date"></div><div class="field"><label>Customer GSTIN</label><input name="bill_to_gstin" maxlength="15" placeholder="Leave blank if not registered"></div><div class="field"><label>Billing state *</label><input name="bill_to_state" required placeholder="Tamil Nadu"></div><div class="field"><label>Place of supply state *</label><input name="place_of_supply_state" required placeholder="Tamil Nadu"></div><div class="field"><label>GST treatment *</label><select name="tax_treatment" required><option value="cgst_sgst">CGST + SGST</option><option value="igst">IGST</option><option value="no_tax">No GST / exempt</option></select></div></div><div class="field"><label>Customer billing address *</label><textarea name="bill_to_address" rows="3" required placeholder="Full billing address"></textarea></div><div class="modal-guidance">GST treatment is selected for this invoice. Verify the tax classification and rate before issue. The system checks the place of supply against the supplier branch state.</div><div id="invoice-copy-message" aria-live="polite"></div></div><footer class="erp-modal-footer"><button type="button" class="btn secondary" id="invoice-copy-cancel">Cancel</button><button type="submit" class="btn btn-primary">Create final invoice draft →</button></footer></form></section>';
+  root.querySelector('.page-content').appendChild(copyModal);
+  const copyForm=copyModal.querySelector('#invoice-copy-form');
+  const closeCopyModal=()=>{copyModal.hidden=true;copySourceInvoice=null;};
+  copyModal.querySelector('#invoice-copy-close').addEventListener('click',closeCopyModal);
+  copyModal.querySelector('#invoice-copy-cancel').addEventListener('click',closeCopyModal);
+  copyModal.addEventListener('click',e=>{if(e.target===copyModal)closeCopyModal();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!copyModal.hidden)closeCopyModal();},{once:false});
+  document.querySelectorAll('.invoice-copy-final').forEach(button=>button.addEventListener('click',()=>{
+   copySourceInvoice=invoices.find(x=>x.id===button.dataset.id);
+   if(!copySourceInvoice)return;
+   copyForm.elements.invoice_date.value=new Date().toISOString().slice(0,10);
+   copyForm.elements.due_date.value=copySourceInvoice.due_date||'';
+   copyForm.elements.bill_to_gstin.value=copySourceInvoice.bill_to_gstin||'';
+   copyForm.elements.bill_to_state.value=copySourceInvoice.bill_to_state||'';
+   copyForm.elements.place_of_supply_state.value=copySourceInvoice.place_of_supply_state||'';
+   copyForm.elements.tax_treatment.value=copySourceInvoice.tax_treatment||'cgst_sgst';
+   copyForm.elements.bill_to_address.value=copySourceInvoice.bill_to_address||'';
+   copyModal.querySelector('#copy-source-no').textContent=copySourceInvoice.invoice_no||'Draft Proforma';
+   copyModal.querySelector('#copy-source-total').textContent=money(copySourceInvoice.total_amount,copySourceInvoice.currency_code);
+   copyModal.querySelector('#invoice-copy-message').innerHTML='';
+   copyModal.hidden=false;
+   copyForm.elements.bill_to_state.focus();
   }));
+  copyForm.addEventListener('submit',async e=>{
+   e.preventDefault();
+   if(!copySourceInvoice)return;
+   const d=Object.fromEntries(new FormData(copyForm).entries());
+   if(!d.bill_to_address.trim()||!d.bill_to_state.trim()||!d.place_of_supply_state.trim()){
+    copyModal.querySelector('#invoice-copy-message').innerHTML=message('Complete the billing address, billing state and place of supply.');return;
+   }
+   const submit=copyForm.querySelector('button[type="submit"]');submit.disabled=true;submit.textContent='Creating draft…';
+   const {error}=await supabase.rpc('create_import_lcl_tax_invoice_from_proforma',{
+    p_source_invoice_id:copySourceInvoice.id,p_invoice_date:d.invoice_date,p_due_date:d.due_date||null,
+    p_overrides:{bill_to_address:d.bill_to_address.trim(),bill_to_state:d.bill_to_state.trim(),
+     place_of_supply_state:d.place_of_supply_state.trim(),bill_to_gstin:d.bill_to_gstin.trim(),
+     tax_treatment:d.tax_treatment}
+   });
+   if(error){copyModal.querySelector('#invoice-copy-message').innerHTML=message(error.message);submit.disabled=false;submit.textContent='Create final invoice draft →';return;}
+   closeCopyModal();await renderImportLclBilling(id);
+  });
   document.querySelectorAll('.invoice-preview').forEach(button=>button.addEventListener('click',async()=>{
    button.disabled=true;const invoiceId=button.dataset.id;
    const [invRes,itemRes]=await Promise.all([
@@ -538,8 +556,7 @@ async function renderImportLclBilling(id) {
    popup.document.close();button.disabled=false;
   }));
  } catch(error) {
-  root.innerHTML=shell('<section class="heading"><h1>Billing unavailable</h1>'+message(error.message||'Unable to load billing.')+'<button id="billing-error-back" class="btn secondary">← Back</button></section>','import-lcl');
-  bindShell();document.querySelector('#billing-error-back')?.addEventListener('click',()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id)));
+  root.innerHTML=shell('<section class="heading"><h1>Billing unavailable</h1>'+message(error.message||'Unable to load billing.')+'<button id="billing-error-back" class="btn secondary">← Back</button></section>','billing');bindShell();document.querySelector('#billing-error-back')?.addEventListener('click',()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id)));
  }
 }
 
