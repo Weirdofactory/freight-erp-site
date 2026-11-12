@@ -114,7 +114,7 @@ function shell(content, active = "dashboard") {
   return `<div class="app-shell"><aside class="sidebar"><div class="brand">FREIGHT<span> ERP</span></div>
     <nav class="nav"><div class="nav-label">WORKSPACE</div><a class="${active === "dashboard" ? "active" : ""}" href="#/dashboard">Overview</a>
     <div class="nav-label">OPERATIONS</div><a class="${active === "import-lcl" ? "active" : ""}" href="#/import-lcl">Import LCL</a>
-    <div class="nav-label">ADMINISTRATION</div><a class="${active === "company" ? "active" : ""}" href="#/company">Company management</a>
+    <div class="nav-label">ADMINISTRATION</div><a class="${active === "users" ? "active" : ""}" href="#/users">User management</a><a class="${active === "company" ? "active" : ""}" href="#/company">Company management</a>
     <a class="${active === "platform" ? "active" : ""}" href="#/platform">Platform Super Admin</a></nav>
     <div class="sidebar-foot">${esc(email)}<br>Authenticated session</div></aside>
     <main class="main"><header class="top"><strong>Freight ERP / ${esc(active.toUpperCase())}</strong><div class="top-actions"><span class="pill">SECURE SESSION</span><button id="logout" class="btn secondary">Sign out</button></div></header>${content}</main></div>`;
@@ -135,10 +135,11 @@ async function renderDashboard() {
       <article class="stat"><small>DATA SECURITY</small><strong>RLS</strong><span>Tenant-scoped policies</span></article></section>
       <section class="section"><h2>Current workspace</h2><article class="panel"><div class="row"><span>Company</span><strong>${esc(company)}</strong></div><div class="row"><span>Signed-in account</span><strong>${esc(currentUser.email)}</strong></div><div class="row"><span>Assigned role</span><strong>${esc(role)}</strong></div><div class="row"><span>Default timezone</span><strong>Asia/Kolkata</strong></div></article></section>
       <section class="section"><h2>Operations modules</h2><article class="panel"><h3>Import LCL</h3><p class="muted">Register overseas pre-alerts, track HBLs, vessels, arrival, CFS, customs and delivery.</p><button id="open-import-lcl" class="btn">Open Import LCL →</button></article></section>
-      <section class="section"><h2>Administration</h2><article class="panel"><p class="muted">Company and branch administration, user access and role permissions.</p><button id="open-company" class="btn secondary">Company management →</button></article></section>
+      <section class="section"><h2>Administration</h2><article class="panel"><p class="muted">Manage employee invitations, roles and branch access.</p><button id="open-users" class="btn">User management →</button></article><article class="panel"><p class="muted">Company and branch administration.</p><button id="open-company" class="btn secondary">Company management →</button></article></section>
     `);
     bindShell();
     document.querySelector("#open-company").addEventListener("click", () => setRoute("company"));
+    document.querySelector("#open-users").addEventListener("click", () => setRoute("users"));
     document.querySelector("#open-import-lcl").addEventListener("click", () => setRoute("import-lcl"));
   } catch (error) {
     root.innerHTML = shell(`<section class="heading"><h1>Workspace unavailable</h1>${message(error.message || "Could not load company memberships.")}<p class="muted">Check Supabase Row Level Security and your active company membership.</p></section>`);
@@ -279,6 +280,70 @@ async function renderImportLclDetail(id) {
  }
 }
 
+
+async function renderUserManagement() {
+  root.innerHTML='<main class="loading">Loading user management…</main>';
+  try {
+    const memberships=await loadMemberships();
+    const membership=memberships[0];
+    if(!membership) throw new Error('No active company membership found.');
+    const companyId=membership.company_id;
+    const {data,error}=await supabase.functions.invoke('company-users',{body:{action:'list',company_id:companyId}});
+    if(error||!data||data.error) throw new Error(data?.error||error?.message||'Unable to load users.');
+    const users=data.users||[], roles=data.roles||[], branches=data.branches||[];
+    const roleOptions=roles.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.name)+'</option>').join('');
+    const branchChecks=branches.filter(b=>b.status==='active').map(b=>'<label class="branch-check"><input type="checkbox" name="branch_ids" value="'+esc(b.id)+'"><span>'+esc(b.name)+' <small>'+esc(b.branch_code)+'</small></span></label>').join('');
+    const rows=users.map(u=>{
+      const assigned=u.branches?.length?u.branches.map(b=>b.name).join(', '):u.branch_scope==='all'?'All branches':'No branch selected';
+      const access=u.email_confirmed?'Email confirmed':u.status==='invited'?'Invitation pending':'Not confirmed';
+      return '<tr data-user-search="'+esc((u.email+' '+u.display_name+' '+(u.role?.name||'')).toLowerCase())+'" data-user-status="'+esc(u.status)+'"><td><strong>'+esc(u.display_name||'Name not set')+'</strong><br><small>'+esc(u.email)+'</small><br><small class="muted">'+esc(access)+'</small></td><td><select class="user-role" data-id="'+esc(u.membership_id)+'" '+(u.user_id===currentUser?.id?'disabled':'')+'>'+roles.map(r=>'<option value="'+esc(r.id)+'" '+(r.id===u.role_id?'selected':'')+'>'+esc(r.name)+'</option>').join('')+'</select></td><td><select class="user-status" data-id="'+esc(u.membership_id)+'" '+(u.user_id===currentUser?.id?'disabled':'')+'>'+['active','invited','suspended','deactivated'].map(v=>'<option value="'+v+'" '+(v===u.status?'selected':'')+'>'+v.replaceAll('_',' ')+'</option>').join('')+'</select></td><td>'+esc(assigned)+'</td><td>'+esc(u.last_sign_in_at?new Date(u.last_sign_in_at).toLocaleDateString('en-IN'):'Never')+'</td><td><button class="btn secondary user-save" data-id="'+esc(u.membership_id)+'" '+(u.user_id===currentUser?.id?'disabled':'')+'>Save</button></td></tr>';
+    }).join('')||'<tr><td colspan="6" class="empty">No company users found yet.</td></tr>';
+    root.innerHTML=shell(
+      '<section class="heading"><div class="eyebrow">ADMINISTRATION / ACCESS CONTROL</div><div class="module-heading"><div><h1>User Management</h1><p class="muted">Invite team members, assign roles and control branch access for this company.</p></div><span class="pill">'+users.length+' users</span></div></section>'+
+      '<section class="grid"><article class="stat"><small>TOTAL USERS</small><strong>'+users.length+'</strong><span>Company memberships</span></article><article class="stat"><small>ACTIVE</small><strong>'+users.filter(u=>u.status==='active').length+'</strong><span>Access enabled</span></article><article class="stat"><small>INVITATIONS</small><strong>'+users.filter(u=>u.status==='invited').length+'</strong><span>Awaiting email confirmation</span></article><article class="stat"><small>BRANCHES</small><strong>'+branches.filter(b=>b.status==='active').length+'</strong><span>Available for assignment</span></article></section>'+
+      '<section class="section"><h2>Invite a team member</h2><article class="panel"><form id="invite-user-form"><div class="form-grid">'+
+      '<div class="field"><label>Full name *</label><input name="display_name" required maxlength="120" placeholder="Employee full name"></div>'+
+      '<div class="field"><label>Work email *</label><input name="email" type="email" required placeholder="employee@company.com"></div>'+
+      '<div class="field"><label>Phone</label><input name="phone" type="tel" placeholder="+91"></div>'+
+      '<div class="field"><label>Role *</label><select name="role_id" required>'+roleOptions+'</select></div>'+
+      '<div class="field"><label>Branch access *</label><select name="branch_scope" id="invite-branch-scope"><option value="all">All branches</option><option value="selected">Selected branches only</option></select></div>'+
+      '</div><div id="invite-branch-list" class="branch-check-grid" hidden>'+branchChecks+'</div><div id="invite-user-message" aria-live="polite"></div><button class="btn" type="submit">Send invitation →</button></form></article></section>'+
+      '<section class="section"><div class="module-toolbar"><h2>Company users</h2><input id="users-search" class="search-input" placeholder="Search name, email or role…"><select id="users-status" class="filter-select"><option value="">All statuses</option><option>active</option><option>invited</option><option>suspended</option><option>deactivated</option></select></div><article class="panel table-wrap"><table><thead><tr><th>USER</th><th>ROLE</th><th>MEMBERSHIP</th><th>BRANCH ACCESS</th><th>LAST SIGN IN</th><th>ACTION</th></tr></thead><tbody id="company-user-rows">'+rows+'</tbody></table></article></section>',
+      'users'
+    );
+    bindShell();
+    const scope=document.querySelector('#invite-branch-scope'), branchList=document.querySelector('#invite-branch-list');
+    scope.addEventListener('change',()=>{branchList.hidden=scope.value!=='selected';});
+    document.querySelector('#invite-user-form').addEventListener('submit',async e=>{
+      e.preventDefault();
+      const form=e.currentTarget, d=Object.fromEntries(new FormData(form).entries()), button=form.querySelector('button[type=submit]'), out=document.querySelector('#invite-user-message');
+      const branchIds=[...form.querySelectorAll('input[name="branch_ids"]:checked')].map(x=>x.value);
+      if(d.branch_scope==='selected'&&!branchIds.length){out.innerHTML=message('Select at least one branch.');return;}
+      button.disabled=true;button.textContent='Sending invitation…';
+      const {data:result,error:inviteError}=await supabase.functions.invoke('company-users',{body:{action:'invite',company_id:companyId,email:d.email,display_name:d.display_name,phone:d.phone,role_id:d.role_id,branch_scope:d.branch_scope,branch_ids:branchIds}});
+      if(inviteError||result?.error){out.innerHTML=message(result?.error||inviteError?.message||'Invitation failed.');button.disabled=false;button.textContent='Send invitation →';return;}
+      out.innerHTML=message(result.invited?'Invitation sent to '+result.user.email+'. The membership will activate after the user confirms the email.':'Existing account added to this company. The user can sign in with their existing account.','success');
+      await renderUserManagement();
+    });
+    const applyUserFilters=()=>{
+      const q=document.querySelector('#users-search').value.toLowerCase(), st=document.querySelector('#users-status').value;
+      document.querySelectorAll('#company-user-rows tr[data-user-search]').forEach(row=>{row.hidden=!(row.dataset.userSearch.includes(q)&&(!st||row.dataset.userStatus===st));});
+    };
+    document.querySelector('#users-search').addEventListener('input',applyUserFilters);
+    document.querySelector('#users-status').addEventListener('change',applyUserFilters);
+    document.querySelectorAll('.user-save').forEach(button=>button.addEventListener('click',async()=>{
+      const id=button.dataset.id, role=document.querySelector('.user-role[data-id="'+id+'"]')?.value, status=document.querySelector('.user-status[data-id="'+id+'"]')?.value;
+      button.disabled=true;button.textContent='Saving…';
+      const {data:result,error:updateError}=await supabase.functions.invoke('company-users',{body:{action:'update',company_id:companyId,membership_id:id,role_id:role,status}});
+      if(updateError||result?.error){alert(result?.error||updateError?.message||'Unable to update user.');button.disabled=false;button.textContent='Save';return;}
+      await renderUserManagement();
+    }));
+  } catch(error) {
+    root.innerHTML=shell('<section class="heading"><div class="eyebrow">ADMINISTRATION</div><h1>User Management</h1>'+message(error.message||'Unable to load user management.')+'</section>','users');
+    bindShell();
+  }
+}
+
 async function renderPlatform() {
   root.innerHTML = '<main class="loading">Verifying platform access…</main>';
   const { data, error } = await supabase.functions.invoke("platform-overview", { method: "POST" });
@@ -329,6 +394,7 @@ async function navigate() {
   if (!user) { renderLogin(); return; }
   if (page === "platform") { await renderPlatform(); return; }
   if (page === "company") { await renderCompany(); return; }
+  if (page === "users") { await renderUserManagement(); return; }
   if (page === "import-lcl") { await renderImportLcl(); return; }
   if (page === "import-lcl-detail") { const id=new URLSearchParams(location.hash.split('?')[1]||'').get('id'); if(id){await renderImportLclDetail(id);return;} await renderImportLcl(); return; }
   await renderDashboard();
