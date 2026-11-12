@@ -270,7 +270,11 @@ async function renderImportLclDetail(id) {
   document.querySelector('#milestone-form').addEventListener('submit',async e=>{
    e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());
    const {error}=await supabase.from('import_lcl_milestones').insert({company_id:companyId,shipment_id:id,milestone_code:d.milestone_code,milestone_at:d.milestone_at?new Date(d.milestone_at).toISOString():new Date().toISOString(),location:d.location||null,notes:d.notes||null});
-   if(error){alert(error.message);return;}await renderImportLclDetail(id);
+   if(error){alert(error.message);return;}
+   const occurred=d.milestone_at?new Date(d.milestone_at):new Date(),stamp=occurred.toISOString(),day=stamp.slice(0,10);
+   const milestoneUpdates={vessel_departed:{status:'in_transit'},vessel_arrived:{status:'arrived',ata:day},arrival_notice_sent:{arrival_notice_date:day},cfs_received:{cfs_arrival_at:stamp},destuffing_completed:{status:'destuffed',destuffed_at:stamp},customs_filed:{customs_status:'filed'},customs_cleared:{status:'customs_cleared',customs_status:'cleared'},do_issued:{status:'ready_for_delivery',delivery_status:'do_issued'},cargo_delivered:{status:'delivered',delivery_status:'delivered'}};
+   if(milestoneUpdates[d.milestone_code]){const {error:updateError}=await supabase.from('import_lcl_shipments').update({...milestoneUpdates[d.milestone_code],updated_at:new Date().toISOString()}).eq('id',id).eq('company_id',companyId);if(updateError){alert('Milestone saved, but shipment summary was not updated: '+updateError.message);}}
+   await renderImportLclDetail(id);
   });
   document.querySelector('#document-form').addEventListener('submit',async e=>{
    e.preventDefault();const form=e.currentTarget,file=form.querySelector('input[name="document_file"]').files[0],out=document.querySelector('#document-message'),button=form.querySelector('button[type=submit');
