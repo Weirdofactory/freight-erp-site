@@ -101,48 +101,96 @@ function renderResetPassword(error = "") {
     await renderDashboard();
   });
 }
+let activeMembership = null;
+let globalSearchTerm = "";
+let globalNewShipment = false;
+
 async function loadMemberships() {
   const { data, error } = await supabase.from("company_memberships")
     .select("company_id,status,companies(display_name,default_currency),roles(name,code)")
     .eq("status", "active");
   if (error) throw error;
+  activeMembership = (data || [])[0] || null;
   return data || [];
 }
 
 function shell(content, active = "dashboard") {
   const email = currentUser?.email || "Signed-in user";
-  return `<div class="app-shell"><aside class="sidebar"><div class="brand">FREIGHT<span> ERP</span></div>
-    <nav class="nav"><div class="nav-label">WORKSPACE</div><a class="${active === "dashboard" ? "active" : ""}" href="#/dashboard">Overview</a>
-    <div class="nav-label">OPERATIONS</div><a class="${active === "import-lcl" ? "active" : ""}" href="#/import-lcl">Import LCL</a>
-    <div class="nav-label">ADMINISTRATION</div><a class="${active === "users" ? "active" : ""}" href="#/users">User management</a><a class="${active === "company" ? "active" : ""}" href="#/company">Company management</a>
-    <a class="${active === "platform" ? "active" : ""}" href="#/platform">Platform Super Admin</a></nav>
-    <div class="sidebar-foot">${esc(email)}<br>Authenticated session</div></aside>
-    <main class="main"><header class="top"><strong>Freight ERP / ${esc(active.toUpperCase())}</strong><div class="top-actions"><span class="pill">SECURE SESSION</span><button id="logout" class="btn secondary">Sign out</button></div></header>${content}</main></div>`;
+  const companyName = activeMembership?.companies?.display_name || "Company workspace";
+  const roleName = activeMembership?.roles?.name || "Workspace user";
+  const initials = email.split("@")[0].split(/[._-]/).map(x=>x[0]||"").join("").slice(0,2).toUpperCase() || "U";
+  const pageNames = {dashboard:"Overview", "import-lcl":"Import LCL", billing:"Invoices", users:"User management", company:"Company management", platform:"Platform administration"};
+  const pageName = pageNames[active] || "Workspace";
+  const navLink = (key, href, icon, label) => '<a class="nav-link '+(active===key?'active':'')+'" href="'+href+'"><span class="nav-icon">'+icon+'</span><span>'+label+'</span>'+(active===key?'<i class="nav-current"></i>':'')+'</a>';
+  return `<div class="app-shell">
+    <aside class="sidebar" id="app-sidebar">
+      <a class="sidebar-brand" href="#/dashboard" aria-label="Freight ERP home"><span class="brand-mark">F</span><span><strong>FREIGHT ERP</strong><small>FORWARDING WORKSPACE</small></span></a>
+      <div class="workspace-switch"><span class="workspace-avatar">${esc(companyName.slice(0,1).toUpperCase())}</span><span><small>ACTIVE WORKSPACE</small><strong>${esc(companyName)}</strong></span><span class="workspace-chevron">⌄</span></div>
+      <nav class="nav">
+        <div class="nav-label">WORKSPACE</div>
+        ${navLink("dashboard","#/dashboard","⌂","Overview")}
+        <div class="nav-label">OPERATIONS</div>
+        ${navLink("import-lcl","#/import-lcl","▤","Import LCL")}
+        <div class="nav-label">FINANCE</div>
+        ${navLink("billing","#/billing","▧","Invoice register")}
+        <div class="nav-label">ADMINISTRATION</div>
+        ${navLink("users","#/users","♙","User management")}
+        ${navLink("company","#/company","▦","Company management")}
+        ${navLink("platform","#/platform","◇","Platform admin")}
+      </nav>
+      <div class="sidebar-bottom"><div class="sidebar-support"><span>✦</span><strong>Need help?</strong><small>Manage your forwarding operations in one workspace.</small></div><div class="sidebar-foot"><span class="user-avatar">${esc(initials)}</span><span class="user-meta"><strong>${esc(email)}</strong><small>${esc(roleName)}</small></span><span class="session-dot" title="Signed in"></span></div></div>
+    </aside>
+    <div class="main-area">
+      <header class="topbar">
+        <div class="topbar-title"><button id="sidebar-toggle" class="mobile-menu" type="button" aria-label="Open navigation">☰</button><div><div class="breadcrumbs">FREIGHT ERP <span>/</span> ${esc(pageName.toUpperCase())}</div><strong>${esc(pageName)}</strong></div></div>
+        <form id="global-search" class="global-search" role="search"><span>⌕</span><input id="global-search-input" type="search" placeholder="Search shipment, HBL, MBL, agent…" autocomplete="off"><kbd>Enter</kbd></form>
+        <div class="top-actions"><span class="secure-indicator"><i></i> Secure session</span><button id="global-new-shipment" class="btn btn-primary" type="button">＋ New shipment</button><button id="logout" class="icon-button" type="button" title="Sign out" aria-label="Sign out">↗</button></div>
+      </header>
+      <main class="main"><div class="page-content">${content}</div><footer class="app-footer"><span>FREIGHT ERP</span><span>Cloud operations workspace · Asia/Kolkata</span></footer></main>
+    </div>
+  </div>`;
 }
 
 async function renderDashboard() {
-  root.innerHTML = '<main class="loading">Loading your workspace…</main>';
+  root.innerHTML = '<main class="loading"><div class="loading-spinner"></div>Loading your workspace…</main>';
   try {
     const memberships = await loadMemberships();
-    const company = memberships[0]?.companies?.display_name || "No company assigned";
-    const role = memberships[0]?.roles?.name || "Workspace user";
+    const membership = memberships[0];
+    if (!membership) throw new Error("Your account does not have an active company membership.");
+    const companyId = membership.company_id;
+    const safeCount = async query => { try { const r=await query; return r.error?0:(r.count??0); } catch { return 0; } };
+    const [totalShipments,inTransit,arrived,invoiceCount,recentRes,branchCount] = await Promise.all([
+      safeCount(supabase.from("import_lcl_shipments").select("id",{count:"exact",head:true}).eq("company_id",companyId)),
+      safeCount(supabase.from("import_lcl_shipments").select("id",{count:"exact",head:true}).eq("company_id",companyId).eq("status","in_transit")),
+      safeCount(supabase.from("import_lcl_shipments").select("id",{count:"exact",head:true}).eq("company_id",companyId).in("status",["arrived","destuffed"])),
+      safeCount(supabase.from("import_lcl_invoices").select("id",{count:"exact",head:true}).eq("company_id",companyId)),
+      supabase.from("import_lcl_shipments").select("id,shipment_no,hbl_no,agent_name,origin_port,destination_port,vessel_name,eta,status,created_at").eq("company_id",companyId).order("created_at",{ascending:false}).limit(6),
+      safeCount(supabase.from("branches").select("id",{count:"exact",head:true}).eq("company_id",companyId).eq("status","active"))
+    ]);
+    if (recentRes.error) throw recentRes.error;
+    const recent = recentRes.data || [];
+    const statusLabel = s => ({pre_alert:"Pre-alert",in_transit:"In transit",arrived:"Arrived",destuffed:"Destuffed",customs_hold:"Customs hold",customs_cleared:"Customs cleared",ready_for_delivery:"Ready for delivery",delivered:"Delivered",closed:"Closed",cancelled:"Cancelled"}[s]||s);
+    const recentRows = recent.map(s=>'<tr class="clickable-row" data-id="'+esc(s.id)+'"><td><strong>'+esc(s.shipment_no)+'</strong><small class="table-sub">'+esc(s.hbl_no||"HBL pending")+'</small></td><td>'+esc(s.agent_name||"—")+'</td><td>'+esc(s.origin_port||"—")+' <span class="route-arrow">→</span> '+esc(s.destination_port||"—")+'</td><td>'+esc(s.vessel_name||"—")+'</td><td>'+esc(s.eta||"—")+'</td><td><span class="status-pill">'+esc(statusLabel(s.status))+'</span></td></tr>').join("") || '<tr><td colspan="6" class="empty">Your recent shipments will appear here when you create your first Import LCL record.</td></tr>';
     root.innerHTML = shell(`
-      <section class="heading"><div class="eyebrow">OPERATIONS CONTROL CENTRE</div><h1>Good to have you back.</h1><p class="muted">Your foundation workspace is ready for configuration.</p></section>
-      ${memberships.length ? "" : '<div class="notice">Your account is signed in, but no active company membership is visible. Ask your platform administrator to check your company assignment.</div>'}
-      <section class="grid"><article class="stat"><small>COMPANY WORKSPACES</small><strong>${memberships.length}</strong><span>Active memberships visible</span></article>
-      <article class="stat"><small>ACTIVE BRANCHES</small><strong>—</strong><span>Branch directory setup</span></article>
-      <article class="stat"><small>TEAM MEMBERS</small><strong>—</strong><span>User administration</span></article>
-      <article class="stat"><small>DATA SECURITY</small><strong>RLS</strong><span>Tenant-scoped policies</span></article></section>
-      <section class="section"><h2>Current workspace</h2><article class="panel"><div class="row"><span>Company</span><strong>${esc(company)}</strong></div><div class="row"><span>Signed-in account</span><strong>${esc(currentUser.email)}</strong></div><div class="row"><span>Assigned role</span><strong>${esc(role)}</strong></div><div class="row"><span>Default timezone</span><strong>Asia/Kolkata</strong></div></article></section>
-      <section class="section"><h2>Operations modules</h2><article class="panel"><h3>Import LCL</h3><p class="muted">Register overseas pre-alerts, track HBLs, vessels, arrival, CFS, customs and delivery.</p><button id="open-import-lcl" class="btn">Open Import LCL →</button></article></section>
-      <section class="section"><h2>Administration</h2><article class="panel"><p class="muted">Manage employee invitations, roles and branch access.</p><button id="open-users" class="btn">User management →</button></article><article class="panel"><p class="muted">Company and branch administration.</p><button id="open-company" class="btn secondary">Company management →</button></article></section>
+      <section class="welcome-banner"><div><div class="eyebrow">OPERATIONS CONTROL CENTRE</div><h1>Good to have you back.</h1><p>Keep shipments, documentation and billing moving from one workspace.</p><div class="welcome-meta"><span>⌖ ${esc(membership.companies?.display_name||"Company workspace")}</span><span>◷ Asia/Kolkata</span></div></div><div class="welcome-art"><span class="art-orbit orbit-one"></span><span class="art-orbit orbit-two"></span><span class="art-box">F</span></div></section>
+      <section class="section dashboard-section"><div class="section-heading"><div><h2>Workspace snapshot</h2><p class="muted">Live counts from your accessible company records.</p></div><span class="live-label"><i></i> Live data</span></div>
+        <div class="grid dashboard-kpis">
+          <article class="stat stat-blue"><div class="stat-top"><small>IMPORT SHIPMENTS</small><span>▤</span></div><strong>${totalShipments}</strong><span>Total registered shipments</span></article>
+          <article class="stat stat-teal"><div class="stat-top"><small>IN TRANSIT</small><span>⇢</span></div><strong>${inTransit}</strong><span>Awaiting destination arrival</span></article>
+          <article class="stat stat-amber"><div class="stat-top"><small>ARRIVED / DESTUFFED</small><span>⚓</span></div><strong>${arrived}</strong><span>At destination / CFS</span></article>
+          <article class="stat stat-violet"><div class="stat-top"><small>INVOICES</small><span>▧</span></div><strong>${invoiceCount}</strong><span>Draft and issued documents</span></article>
+        </div>
+      </section>
+      <section class="dashboard-main-grid">
+        <article class="panel recent-panel"><div class="panel-heading"><div><h2>Recent shipments</h2><p class="muted">Latest activity in your workspace</p></div><a class="inline-link" href="#/import-lcl">View all shipments →</a></div><div class="table-wrap"><table><thead><tr><th>SHIPMENT / HBL</th><th>OVERSEAS AGENT</th><th>ROUTE</th><th>VESSEL</th><th>ETA</th><th>STATUS</th></tr></thead><tbody id="dashboard-recent-rows">${recentRows}</tbody></table></div></article>
+        <aside class="dashboard-rail"><article class="panel workspace-panel"><div class="panel-heading"><div><h3>Workspace details</h3><p class="muted">Current company access</p></div><span class="workspace-check">✓</span></div><div class="detail-line"><span>Company</span><strong>${esc(membership.companies?.display_name||"—")}</strong></div><div class="detail-line"><span>Role</span><strong>${esc(membership.roles?.name||"—")}</strong></div><div class="detail-line"><span>Active branches</span><strong>${branchCount}</strong></div><div class="detail-line"><span>Signed in as</span><strong class="truncate-text">${esc(currentUser?.email||"—")}</strong></div></article>
+        <article class="panel shortcuts-panel"><div class="panel-heading"><div><h3>Quick access</h3><p class="muted">Open a working module</p></div></div><a class="shortcut-link" href="#/import-lcl"><span class="shortcut-icon">▤</span><span><strong>Import LCL</strong><small>Pre-alert to cargo delivery</small></span><b>→</b></a><a class="shortcut-link" href="#/billing"><span class="shortcut-icon">▧</span><span><strong>Invoice register</strong><small>Proforma and tax invoices</small></span><b>→</b></a><a class="shortcut-link" href="#/users"><span class="shortcut-icon">♙</span><span><strong>Team access</strong><small>Users and permissions</small></span><b>→</b></a></article></aside>
+      </section>
     `);
     bindShell();
-    document.querySelector("#open-company").addEventListener("click", () => setRoute("company"));
-    document.querySelector("#open-users").addEventListener("click", () => setRoute("users"));
-    document.querySelector("#open-import-lcl").addEventListener("click", () => setRoute("import-lcl"));
+    document.querySelectorAll("#dashboard-recent-rows .clickable-row").forEach(row=>row.addEventListener("click",()=>setRoute("import-lcl-detail?id="+encodeURIComponent(row.dataset.id))));
   } catch (error) {
-    root.innerHTML = shell(`<section class="heading"><h1>Workspace unavailable</h1>${message(error.message || "Could not load company memberships.")}<p class="muted">Check Supabase Row Level Security and your active company membership.</p></section>`);
+    root.innerHTML = shell(`<section class="heading"><h1>Workspace unavailable</h1>${message(error.message || "Could not load company memberships.")}<p class="muted">Check your active company membership and database access.</p></section>`);
     bindShell();
   }
 }
@@ -493,6 +541,62 @@ async function renderImportLclBilling(id) {
  }
 }
 
+
+async function renderBillingRegister() {
+  root.innerHTML='<main class="loading"><div class="loading-spinner"></div>Loading invoice register…</main>';
+  try {
+    const memberships=await loadMemberships(),membership=memberships[0];
+    if(!membership) throw new Error("No active company membership.");
+    const companyId=membership.company_id;
+    const [invoiceRes,chargeRes]=await Promise.all([
+      supabase.from("import_lcl_invoices").select("*").eq("company_id",companyId).order("created_at",{ascending:false}).limit(500),
+      supabase.from("import_lcl_charges").select("id,billing_status").eq("company_id",companyId).eq("charge_side","customer").limit(1000)
+    ]);
+    if(invoiceRes.error) throw invoiceRes.error;
+    if(chargeRes.error) throw chargeRes.error;
+    const invoices=invoiceRes.data||[],charges=chargeRes.data||[];
+    const shipmentIds=[...new Set(invoices.map(x=>x.shipment_id).filter(Boolean))];
+    let shipmentMap={};
+    if(shipmentIds.length){
+      const {data,error}=await supabase.from("import_lcl_shipments").select("id,shipment_no,hbl_no,agent_name,consignee_name").eq("company_id",companyId).in("id",shipmentIds);
+      if(error) throw error;
+      shipmentMap=Object.fromEntries((data||[]).map(x=>[x.id,x]));
+    }
+    const issued=invoices.filter(x=>x.status==="issued");
+    const drafts=invoices.filter(x=>x.status==="draft");
+    const tax=invoices.filter(x=>x.invoice_type==="tax");
+    const money=(n,c)=>Number(n||0).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+String(c||"");
+    const rows=invoices.map(x=>{
+      const shipment=shipmentMap[x.shipment_id]||{};
+      const type=x.invoice_type==="tax"?"Tax Invoice":"Proforma";
+      const statusClass=x.status==="issued"?"status-issued":x.status==="draft"?"status-draft":"status-cancelled";
+      return '<tr data-search="'+esc([x.invoice_no,type,x.bill_to_name,shipment.shipment_no,shipment.hbl_no,shipment.agent_name,x.status].join(" ").toLowerCase())+'" data-status="'+esc(x.status)+'"><td><strong>'+esc(x.invoice_no||"Draft — not numbered")+'</strong><small class="table-sub">'+esc(type)+(x.source_invoice_id?" · Copied from Proforma":"")+'</small></td><td><strong>'+esc(shipment.shipment_no||"Shipment")+'</strong><small class="table-sub">'+esc(shipment.hbl_no||"HBL pending")+'</small></td><td>'+esc(x.bill_to_name||"—")+'</td><td>'+esc(x.invoice_date||"—")+'</td><td><span class="status-pill '+statusClass+'">'+esc(x.status)+'</span></td><td class="money-cell">'+money(x.total_amount,x.currency_code)+'</td><td><button type="button" class="btn btn-small btn-secondary invoice-open" data-shipment="'+esc(x.shipment_id)+'">Open →</button></td></tr>';
+    }).join("")||'<tr><td colspan="7" class="empty">No invoices are recorded yet. Create a Proforma or Tax Invoice from an Import LCL shipment.</td></tr>';
+    root.innerHTML=shell(`
+      <section class="page-heading"><div><div class="eyebrow">FINANCE / RECEIVABLES</div><h1>Invoice register</h1><p class="muted">A single register for shipment proformas and final tax invoices.</p></div><a class="btn btn-primary" href="#/import-lcl">＋ Start from shipment</a></section>
+      <section class="grid dashboard-kpis invoice-kpis">
+        <article class="stat stat-blue"><div class="stat-top"><small>TOTAL INVOICES</small><span>▧</span></div><strong>${invoices.length}</strong><span>All invoice records</span></article>
+        <article class="stat stat-amber"><div class="stat-top"><small>DRAFTS</small><span>◷</span></div><strong>${drafts.length}</strong><span>Awaiting review or issue</span></article>
+        <article class="stat stat-teal"><div class="stat-top"><small>ISSUED</small><span>✓</span></div><strong>${issued.length}</strong><span>Issued documents</span></article>
+        <article class="stat stat-violet"><div class="stat-top"><small>TAX INVOICES</small><span>▤</span></div><strong>${tax.length}</strong><span>Final invoice records</span></article>
+      </section>
+      <section class="section invoice-register-section"><article class="panel">
+        <div class="panel-heading register-heading"><div><h2>All invoices</h2><p class="muted">Search by invoice number, shipment number, HBL or customer.</p></div><div class="register-filters"><input id="invoice-search" class="search-input" placeholder="Search invoices…"><select id="invoice-status" class="filter-select"><option value="">All statuses</option><option value="draft">Draft</option><option value="issued">Issued</option><option value="cancelled">Cancelled</option></select></div></div>
+        <div class="table-wrap"><table><thead><tr><th>INVOICE</th><th>SHIPMENT / HBL</th><th>BILL TO</th><th>DATE</th><th>STATUS</th><th class="money-cell">TOTAL</th><th>ACTION</th></tr></thead><tbody id="invoice-register-rows">${rows}</tbody></table></div>
+        <div class="register-footnote">${charges.filter(x=>x.billing_status==="unbilled").length} unbilled customer-side charges are available across your accessible company records.</div>
+      </article></section>
+    `,"billing");
+    bindShell();
+    const search=document.querySelector("#invoice-search"),status=document.querySelector("#invoice-status"),invoiceRows=[...document.querySelectorAll("#invoice-register-rows tr[data-search]")];
+    const filter=()=>{const q=search.value.trim().toLowerCase(),st=status.value;invoiceRows.forEach(row=>{row.hidden=!(row.dataset.search.includes(q)&&(!st||row.dataset.status===st));});};
+    search.addEventListener("input",filter);status.addEventListener("change",filter);
+    document.querySelectorAll(".invoice-open").forEach(button=>button.addEventListener("click",()=>setRoute("import-lcl-billing?id="+encodeURIComponent(button.dataset.shipment))));
+  } catch(error) {
+    root.innerHTML=shell('<section class="heading"><h1>Invoice register unavailable</h1>'+message(error.message||"Unable to load invoices.")+'<p class="muted">Check invoice.read permission and branch access.</p></section>',"billing");
+    bindShell();
+  }
+}
+
 async function renderUserManagement() {
   root.innerHTML='<main class="loading">Loading user management…</main>';
   try {
@@ -594,8 +698,21 @@ async function renderCompany() {
 function bindShell() {
   document.querySelector("#logout")?.addEventListener("click", async () => {
     await supabase.auth.signOut();
-    currentUser = null; setRoute("login");
+    currentUser = null; activeMembership=null; setRoute("login");
   });
+  document.querySelector("#global-search")?.addEventListener("submit", e => {
+    e.preventDefault();
+    globalSearchTerm = document.querySelector("#global-search-input")?.value.trim() || "";
+    if (route()==="import-lcl") renderImportLcl(); else setRoute("import-lcl");
+  });
+  document.querySelector("#global-new-shipment")?.addEventListener("click", () => {
+    globalNewShipment = true;
+    if (route()==="import-lcl") renderImportLcl(); else setRoute("import-lcl");
+  });
+  document.querySelector("#sidebar-toggle")?.addEventListener("click", () => {
+    document.body.classList.toggle("sidebar-open");
+  });
+  document.querySelectorAll("#app-sidebar .nav-link").forEach(link=>link.addEventListener("click",()=>document.body.classList.remove("sidebar-open")));
 }
 
 async function navigate() {
@@ -607,6 +724,7 @@ async function navigate() {
   if (page === "platform") { await renderPlatform(); return; }
   if (page === "company") { await renderCompany(); return; }
   if (page === "users") { await renderUserManagement(); return; }
+  if (page === "billing") { await renderBillingRegister(); return; }
   if (page === "import-lcl") { await renderImportLcl(); return; }
   if (page === "import-lcl-detail") { const id=new URLSearchParams(location.hash.split('?')[1]||'').get('id'); if(id){await renderImportLclDetail(id);return;} await renderImportLcl(); return; }
   if (page === "import-lcl-billing") { const id=new URLSearchParams(location.hash.split('?')[1]||'').get('id'); if(id){await renderImportLclBilling(id);return;} await renderImportLcl(); return; }
