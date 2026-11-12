@@ -255,10 +255,12 @@ async function renderImportLclDetail(id) {
    '<section class="section"><h2>Shipment milestones</h2><article class="panel"><form id="milestone-form"><div class="form-grid">'+select('Milestone','milestone_code',codes,'vessel_arrived')+field('Date & time','milestone_at',new Date().toISOString().slice(0,16),'datetime-local')+field('Location','location','')+field('Notes','notes','')+'</div><button class="btn" type="submit">Record milestone</button></form><div class="timeline">'+milestoneRows+'</div></article></section>'+
    '<section class="section"><h2>Shipment documents</h2><article class="panel"><form id="document-form"><div class="form-grid">'+select('Document type','document_type',['hbl','mbl','commercial_invoice','packing_list','arrival_notice','delivery_order','customs_document','delivery_proof','photo','other'],'hbl')+field('Document number','document_number','')+'<div class="field"><label>Choose file * (PDF, image, Word or Excel; max 25 MB)</label><input name="document_file" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx" required></div>'+field('Remarks','document_remarks','')+'</div><div id="document-message" aria-live="polite"></div><button class="btn" type="submit">Upload document →</button></form><div class="table-wrap"><table><thead><tr><th>DOCUMENT</th><th>NUMBER</th><th>SIZE</th><th>STATUS</th><th>FILE</th></tr></thead><tbody>'+docRows+'</tbody></table></div></article></section>'+
    '<section class="section"><h2>Audit history</h2><article class="panel"><div class="timeline">'+auditHtml+'</div></article></section>'+
+   '<section class="section"><div class="module-heading"><div><h2>Billing & invoices</h2><p class="muted">Prepare a Proforma Invoice or GST Tax Invoice from customer-side shipment charges.</p></div><button id="open-billing" class="btn" type="button">Open billing →</button></div></section>'+
    '<section class="section"><h2>Shipment charges</h2><article class="panel"><form id="charge-form"><input type="hidden" name="charge_id" value=""><div class="form-grid">'+field('Charge code *','charge_code','')+field('Description *','description','')+select('Basis','charge_basis',['shipment','w_m','cbm','rt','hbl','container','package','other'],'shipment')+field('Quantity','quantity','1','number')+select('Currency','currency_code',['INR','USD','EUR','CNY','GBP'],'INR')+field('Rate','rate','0','number')+select('Charge side','charge_side',['customer','vendor'],'customer')+select('Billing status','billing_status',['unbilled','invoiced','paid','waived'],'unbilled')+field('Remarks','remarks','')+'</div><div id="charge-message" aria-live="polite"></div><button id="charge-submit" class="btn" type="submit">Add charge</button> <button id="charge-cancel" class="btn secondary" type="button" hidden>Cancel edit</button></form><div class="table-wrap"><table><thead><tr><th>CHARGE</th><th>BASIS</th><th>QTY × RATE</th><th>AMOUNT</th><th>SIDE</th><th>BILLING</th><th>ACTIONS</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></article></section>',
    'import-lcl');
   bindShell();
   document.querySelector('#back-lcl').onclick=()=>setRoute('import-lcl');
+  document.querySelector('#open-billing').onclick=()=>setRoute('import-lcl-billing?id='+encodeURIComponent(id));
   document.querySelector('#core-form').addEventListener('submit',async e=>{
    e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries()),p={};
    const strings=['agent_name','agent_reference','agent_email','origin_country','origin_port','origin_port_code','destination_port','destination_port_code','vessel_name','voyage_no','mbl_no','hbl_no','shipper_name','shipper_address','consignee_name','consignee_address','consignee_email','consignee_phone','notify_party','commodity','package_type','freight_term','etd','eta'];
@@ -349,6 +351,101 @@ async function renderImportLclDetail(id) {
  }
 }
 
+
+
+async function renderImportLclBilling(id) {
+ root.innerHTML='<main class="loading">Loading shipment billing…</main>';
+ try {
+  const memberships=await loadMemberships(),membership=memberships[0];
+  if(!membership) throw new Error('No active company membership.');
+  const companyId=membership.company_id;
+  const [shipmentRes,chargesRes,invoiceRes,companyRes]=await Promise.all([
+   supabase.from('import_lcl_shipments').select('*').eq('id',id).eq('company_id',companyId).single(),
+   supabase.from('import_lcl_charges').select('*').eq('shipment_id',id).eq('company_id',companyId).eq('charge_side','customer').order('created_at',{ascending:false}),
+   supabase.from('import_lcl_invoices').select('*').eq('shipment_id',id).eq('company_id',companyId).order('created_at',{ascending:false}),
+   supabase.from('companies').select('*').eq('id',companyId).single()
+  ]);
+  [shipmentRes,chargesRes,invoiceRes,companyRes].forEach(x=>{if(x.error)throw x.error;});
+  const shipment=shipmentRes.data,charges=chargesRes.data||[],invoices=invoiceRes.data||[],company=companyRes.data;
+  const branchRes=await supabase.from('branches').select('*').eq('id',shipment.branch_id).eq('company_id',companyId).single();
+  if(branchRes.error)throw branchRes.error;
+  const branch=branchRes.data;
+  const money=(n,c)=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+c;
+  const dateToday=new Date().toISOString().slice(0,10);
+  const available=charges.filter(c=>c.billing_status==='unbilled');
+  const currencies=[...new Set(available.map(c=>c.currency_code.trim()))];
+  const currencyOptions=currencies.map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join('');
+  const chargeRows=charges.map(c=>'<tr><td>'+(c.billing_status==='unbilled'?'<input class="bill-charge-check" type="checkbox" value="'+esc(c.id)+'" data-currency="'+esc(c.currency_code.trim())+'">':'—')+'</td><td><strong>'+esc(c.charge_code)+'</strong><br>'+esc(c.description)+'</td><td>'+esc(c.charge_side)+'</td><td>'+esc(c.quantity)+' × '+esc(c.rate)+'</td><td>'+money(c.amount,c.currency_code)+'</td><td>'+esc(c.billing_status)+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">No customer charges entered.</td></tr>';
+  const invoiceRows=invoices.map(i=>'<tr><td><strong>'+esc(i.invoice_no||'Draft')+'</strong><br>'+esc(i.invoice_type==='proforma'?'Proforma Invoice':'Tax Invoice')+'</td><td>'+esc(i.invoice_date)+'</td><td>'+esc(i.status)+'</td><td>'+money(i.total_amount,i.currency_code)+'</td><td><button type="button" class="btn secondary invoice-preview" data-id="'+esc(i.id)+'">Preview / Print</button> '+(i.status==='draft'?'<button type="button" class="btn invoice-issue" data-id="'+esc(i.id)+'">Issue</button>':'')+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">No invoices created for this shipment.</td></tr>';
+  root.innerHTML=shell(
+   '<section class="heading"><div class="eyebrow">IMPORT LCL / BILLING</div><div class="module-heading"><div><h1>Billing · '+esc(shipment.shipment_no)+'</h1><p class="muted">'+esc(shipment.hbl_no||'HBL pending')+' · '+esc(shipment.consignee_name||'Consignee pending')+'</p></div><button id="billing-back" class="btn secondary" type="button">← Shipment detail</button></div></section>'+
+   '<section class="grid"><article class="stat"><small>CUSTOMER CHARGES</small><strong>'+charges.filter(c=>c.charge_side==='customer').length+'</strong><span>All customer-side charges</span></article><article class="stat"><small>UNBILLED</small><strong>'+available.length+'</strong><span>Available for invoice</span></article><article class="stat"><small>INVOICES</small><strong>'+invoices.length+'</strong><span>Draft and issued</span></article><article class="stat"><small>BRANCH</small><strong class="small-stat">'+esc(branch.name)+'</strong><span>'+esc(branch.gstin||'GSTIN not configured')+'</span></article></section>'+
+   '<section class="section"><h2>Create invoice draft</h2><article class="panel"><p class="muted">Select customer charges in one currency. Proforma invoices are estimates; tax invoices become final only after issuing. Confirm GST treatment and rate with your tax advisor before issue.</p><form id="billing-form"><div class="form-grid">'+
+   '<div class="field"><label>Invoice type *</label><select name="invoice_type"><option value="proforma">Proforma Invoice</option><option value="tax">GST Tax Invoice</option></select></div>'+
+   '<div class="field"><label>Currency *</label><select name="currency_code" required>'+currencyOptions+'</select></div>'+
+   '<div class="field"><label>Invoice date *</label><input name="invoice_date" type="date" value="'+dateToday+'" required></div>'+
+   '<div class="field"><label>Due date</label><input name="due_date" type="date"></div>'+
+   '<div class="field"><label>Bill to name *</label><input name="bill_to_name" required value="'+esc(shipment.consignee_name||'')+'"></div>'+
+   '<div class="field"><label>Customer GSTIN</label><input name="bill_to_gstin" maxlength="15" placeholder="GSTIN"></div>'+
+   '<div class="field"><label>Billing state</label><input name="bill_to_state" value="'+esc(shipment.consignee_address||'')+'" placeholder="State"></div>'+
+   '<div class="field"><label>Place of supply state</label><input name="place_of_supply_state" placeholder="State"></div>'+
+   '<div class="field"><label>GST treatment *</label><select name="tax_treatment"><option value="cgst_sgst">CGST + SGST (intra-state)</option><option value="igst">IGST (inter-state)</option><option value="no_tax">No GST / exempt</option></select></div>'+
+   '<div class="field"><label>GST rate (%) *</label><select name="gst_rate"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18" selected>18%</option><option value="28">28%</option></select></div>'+
+   '<div class="field"><label>Terms & payment instructions</label><input name="terms" placeholder="Payment due within…"></div>'+
+   '<div class="field"><label>Notes</label><input name="notes" placeholder="Additional invoice notes"></div>'+
+   '</div><div class="field"><label>Billing address</label><textarea name="bill_to_address" rows="2">'+esc(shipment.consignee_address||'')+'</textarea></div>'+
+   '<div class="field"><label>Customer charges to include</label><div class="table-wrap"><table><thead><tr><th>SELECT</th><th>CHARGE</th><th>SIDE</th><th>QTY × RATE</th><th>AMOUNT</th><th>STATUS</th></tr></thead><tbody>'+chargeRows+'</tbody></table></div></div>'+
+   '<div id="billing-message" aria-live="polite"></div><button class="btn" type="submit" '+(!available.length?'disabled':'')+'>Create invoice draft →</button></form></article></section>'+
+   '<section class="section"><h2>Invoices for this shipment</h2><article class="panel table-wrap"><table><thead><tr><th>INVOICE</th><th>DATE</th><th>STATUS</th><th>TOTAL</th><th>ACTION</th></tr></thead><tbody>'+invoiceRows+'</tbody></table></article></section>',
+   'import-lcl'
+  );
+  bindShell();
+  document.querySelector('#billing-back').onclick=()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id));
+  const currencySelect=document.querySelector('[name="currency_code"]');
+  currencySelect.addEventListener('change',()=>document.querySelectorAll('.bill-charge-check').forEach(c=>{c.disabled=c.dataset.currency!==currencySelect.value;c.checked=false;}));
+  document.querySelector('#billing-form').addEventListener('submit',async e=>{
+   e.preventDefault();const form=e.currentTarget,d=Object.fromEntries(new FormData(form).entries());
+   const selected=[...form.querySelectorAll('.bill-charge-check:checked')].map(x=>x.value);
+   if(!selected.length){document.querySelector('#billing-message').innerHTML=message('Select at least one unbilled customer charge.');return;}
+   if(d.tax_treatment==='cgst_sgst'&&d.bill_to_state&&d.place_of_supply_state&&d.bill_to_state.trim().toLowerCase()!==d.place_of_supply_state.trim().toLowerCase()){
+    document.querySelector('#billing-message').innerHTML=message('Billing state and place of supply differ. Please verify whether IGST applies.');return;
+   }
+   const payload={company_id:companyId,branch_id:shipment.branch_id,shipment_id:id,invoice_type:d.invoice_type,invoice_date:d.invoice_date,due_date:d.due_date,
+    bill_to_name:d.bill_to_name,bill_to_gstin:d.bill_to_gstin,bill_to_address:d.bill_to_address,bill_to_state:d.bill_to_state,
+    place_of_supply_state:d.place_of_supply_state,tax_treatment:d.tax_treatment,currency_code:d.currency_code,gst_rate:Number(d.gst_rate),terms:d.terms,notes:d.notes};
+   const button=form.querySelector('button[type="submit"]');button.disabled=true;button.textContent='Creating draft…';
+   const {data,error}=await supabase.rpc('create_import_lcl_invoice',{p_payload:payload,p_charge_ids:selected});
+   if(error){document.querySelector('#billing-message').innerHTML=message(error.message);button.disabled=false;button.textContent='Create invoice draft →';return;}
+   await renderImportLclBilling(id);
+  });
+  document.querySelectorAll('.invoice-issue').forEach(button=>button.addEventListener('click',async()=>{
+   if(!confirm('Issue this invoice now? An issued tax invoice will lock its linked charges.'))return;
+   button.disabled=true;button.textContent='Issuing…';
+   const {error}=await supabase.rpc('issue_import_lcl_invoice',{p_invoice_id:button.dataset.id});
+   if(error){alert(error.message);button.disabled=false;button.textContent='Issue';return;}
+   await renderImportLclBilling(id);
+  }));
+  document.querySelectorAll('.invoice-preview').forEach(button=>button.addEventListener('click',async()=>{
+   button.disabled=true;const invoiceId=button.dataset.id;
+   const [invRes,itemRes]=await Promise.all([
+    supabase.from('import_lcl_invoices').select('*').eq('id',invoiceId).eq('company_id',companyId).single(),
+    supabase.from('import_lcl_invoice_items').select('*').eq('invoice_id',invoiceId).eq('company_id',companyId).order('created_at')
+   ]);
+   if(invRes.error||itemRes.error){alert(invRes.error?.message||itemRes.error?.message);button.disabled=false;return;}
+   const inv=invRes.data,items=itemRes.data||[];
+   const popup=window.open('','_blank','width=1000,height=800');
+   if(!popup){alert('Allow pop-ups to preview or print invoices.');button.disabled=false;return;}
+   const fmtMoney=(n)=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+esc(inv.currency_code);
+   const lineHtml=items.map((x,i)=>'<tr><td>'+(i+1)+'</td><td>'+esc(x.description)+'</td><td>'+esc(x.quantity)+'</td><td>'+esc(fmtMoney(x.rate))+'</td><td>'+esc(fmtMoney(x.taxable_amount))+'</td><td>'+Number(x.gst_rate).toFixed(2)+'%</td><td>'+esc(fmtMoney(x.line_total))+'</td></tr>').join('');
+   const draftMark=inv.status==='draft'?'<div class="draft">DRAFT — NOT AN ISSUED '+(inv.invoice_type==='tax'?'TAX INVOICE':'PROFORMA INVOICE')+'</div>':'';
+   popup.document.write('<!doctype html><html><head><title>'+esc(inv.invoice_no||'Draft Invoice')+'</title><style>body{font:13px Arial,sans-serif;color:#111;margin:34px}h1{font-size:22px;margin:0 0 5px}.muted{color:#555}.head{display:flex;justify-content:space-between;border-bottom:2px solid #222;padding-bottom:18px}.draft{margin:16px 0;padding:10px;border:1px dashed #b00;color:#b00;text-align:center;font-weight:bold}.parties{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin:22px 0}.meta{margin:20px 0;line-height:1.8}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{border:1px solid #aaa;padding:8px;text-align:left}th{background:#eee}.totals{margin:20px 0 0 auto;width:330px}.totals div{display:flex;justify-content:space-between;padding:5px;border-bottom:1px solid #ddd}.grand{font-weight:bold;font-size:16px}.foot{margin-top:45px;display:flex;justify-content:space-between}.small{font-size:11px;color:#555}@media print{button{display:none}}</style></head><body>'+draftMark+'<div class="head"><div><h1>'+esc(company.legal_name||company.display_name)+'</h1><div>'+esc([branch.address_line_1,branch.address_line_2,branch.city,branch.state_region,branch.postal_code].filter(Boolean).join(', '))+'</div><div>GSTIN: '+esc(branch.gstin||company.gstin||'Not configured')+' · '+esc(branch.email||company.email||'')+' · '+esc(branch.phone||company.phone||'')+'</div></div><div><h1>'+(inv.invoice_type==='tax'?'TAX INVOICE':'PROFORMA INVOICE')+'</h1><div>Invoice No: '+esc(inv.invoice_no||'Draft')+'</div><div>Date: '+esc(inv.invoice_date)+'</div><div>Due: '+esc(inv.due_date||'—')+'</div></div></div><div class="parties"><div><b>Bill To</b><div>'+esc(inv.bill_to_name)+'</div><div>'+esc(inv.bill_to_address||'')+'</div><div>GSTIN: '+esc(inv.bill_to_gstin||'—')+'</div><div>State: '+esc(inv.bill_to_state||'—')+'</div></div><div><b>Shipment Details</b><div>Shipment: '+esc(shipment.shipment_no)+'</div><div>HBL: '+esc(shipment.hbl_no||'—')+'</div><div>MBL: '+esc(shipment.mbl_no||'—')+'</div><div>Vessel / Voyage: '+esc(shipment.vessel_name||'—')+' / '+esc(shipment.voyage_no||'—')+'</div><div>Place of Supply: '+esc(inv.place_of_supply_state||'—')+'</div></div></div><table><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Rate</th><th>Taxable Value</th><th>GST</th><th>Total</th></tr></thead><tbody>'+lineHtml+'</tbody></table><div class="totals"><div><span>Taxable value</span><b>'+fmtMoney(inv.taxable_value)+'</b></div>'+(inv.tax_treatment==='cgst_sgst'?'<div><span>CGST</span><b>'+fmtMoney(inv.cgst_amount)+'</b></div><div><span>SGST</span><b>'+fmtMoney(inv.sgst_amount)+'</b></div>':'')+(inv.tax_treatment==='igst'?'<div><span>IGST</span><b>'+fmtMoney(inv.igst_amount)+'</b></div>':'')+'<div class="grand"><span>Grand Total</span><b>'+fmtMoney(inv.total_amount)+'</b></div></div><p><b>Terms:</b> '+esc(inv.terms||'')+'</p><p><b>Notes:</b> '+esc(inv.notes||'')+'</p><div class="foot"><div class="small">This document is generated by Freight ERP. Amounts are in '+esc(inv.currency_code)+'.</div><div>For '+esc(company.legal_name||company.display_name)+'<br><br><br>Authorised Signatory</div></div><script>window.onload=()=>window.print()<\/script></body></html>');
+   popup.document.close();button.disabled=false;
+  }));
+ } catch(error) {
+  root.innerHTML=shell('<section class="heading"><h1>Billing unavailable</h1>'+message(error.message||'Unable to load billing.')+'<button id="billing-error-back" class="btn secondary">← Back</button></section>','import-lcl');
+  bindShell();document.querySelector('#billing-error-back')?.addEventListener('click',()=>setRoute('import-lcl-detail?id='+encodeURIComponent(id)));
+ }
+}
 
 async function renderUserManagement() {
   root.innerHTML='<main class="loading">Loading user management…</main>';
@@ -466,6 +563,7 @@ async function navigate() {
   if (page === "users") { await renderUserManagement(); return; }
   if (page === "import-lcl") { await renderImportLcl(); return; }
   if (page === "import-lcl-detail") { const id=new URLSearchParams(location.hash.split('?')[1]||'').get('id'); if(id){await renderImportLclDetail(id);return;} await renderImportLcl(); return; }
+  if (page === "import-lcl-billing") { const id=new URLSearchParams(location.hash.split('?')[1]||'').get('id'); if(id){await renderImportLclBilling(id);return;} await renderImportLcl(); return; }
   await renderDashboard();
 }
 
