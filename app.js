@@ -259,9 +259,9 @@ async function renderImportLcl() {
       const payload={company_id:companyId,branch_id:data.branch_id,agent_name:data.agent_name.trim(),agent_reference:data.agent_reference||null,agent_email:data.agent_email||null,origin_port:data.origin_port.trim(),destination_port:data.destination_port.trim(),vessel_name:data.vessel_name||null,voyage_no:data.voyage_no||null,mbl_no:data.mbl_no||null,hbl_no:data.hbl_no||null,shipper_name:data.shipper_name||null,consignee_name:data.consignee_name.trim(),consignee_email:data.consignee_email||null,consignee_phone:data.consignee_phone||null,commodity:data.commodity||null,package_count:Number(data.package_count||0),package_type:data.package_type||null,gross_weight_kg:Number(data.gross_weight_kg||0),volume_cbm:Number(data.volume_cbm||0),freight_term:data.freight_term||null,etd:data.etd||null,eta:data.eta||null,cfs_name:data.cfs_name||null,remarks:data.remarks||null};
       const {data:created,error:createError}=await supabase.from('import_lcl_shipments').insert(payload).select('id,shipment_no').single();
       if(createError){msg.innerHTML=message(createError.message||'Unable to save shipment. Check your role permissions and required fields.');submit.disabled=false;submit.textContent='Save Import Shipment →';return;}
-      await supabase.from('import_lcl_milestones').insert({company_id:companyId,shipment_id:created.id,milestone_code:'pre_alert_received',notes:'Shipment registered in Freight ERP'});
-      msg.innerHTML=message('Shipment '+created.shipment_no+' created successfully.','success');
-      await renderImportLcl();
+      const {error:milestoneError}=await supabase.from('import_lcl_milestones').insert({company_id:companyId,shipment_id:created.id,milestone_code:'pre_alert_received',notes:'Shipment registered in Freight ERP'});
+      if(milestoneError){alert('Shipment '+created.shipment_no+' was saved, but the initial pre-alert milestone could not be recorded: '+milestoneError.message+'. You can add it from the shipment detail screen.');}
+      setRoute('import-lcl-detail?id='+encodeURIComponent(created.id));
     });
   } catch(error) { root.innerHTML=shell(`<section class="heading"><h1>Import LCL unavailable</h1>${message(error.message||'Unable to load Import LCL.')}</section>`,'import-lcl');bindShell(); }
 }
@@ -574,8 +574,8 @@ async function renderBillingRegister() {
       supabase.from("import_lcl_charges").select("id,billing_status").eq("company_id",companyId).eq("charge_side","customer").limit(1000)
     ]);
     if(invoiceRes.error) throw invoiceRes.error;
-    if(chargeRes.error) throw chargeRes.error;
-    const invoices=invoiceRes.data||[],charges=chargeRes.data||[];
+    const invoices=invoiceRes.data||[],charges=chargeRes.error?[]:(chargeRes.data||[]);
+    const chargeVisibilityNote=chargeRes.error?'Unbilled charge count is not available for your current role.':(charges.filter(x=>x.billing_status==="unbilled").length+' unbilled customer-side charges are available across your accessible company records.');
     const shipmentIds=[...new Set(invoices.map(x=>x.shipment_id).filter(Boolean))];
     let shipmentMap={};
     if(shipmentIds.length){
@@ -604,7 +604,7 @@ async function renderBillingRegister() {
       <section class="section invoice-register-section"><article class="panel">
         <div class="panel-heading register-heading"><div><h2>All invoices</h2><p class="muted">Search by invoice number, shipment number, HBL or customer.</p></div><div class="register-filters"><input id="invoice-search" class="search-input" placeholder="Search invoices…"><select id="invoice-status" class="filter-select"><option value="">All statuses</option><option value="draft">Draft</option><option value="issued">Issued</option><option value="cancelled">Cancelled</option></select></div></div>
         <div class="table-wrap"><table><thead><tr><th>INVOICE</th><th>SHIPMENT / HBL</th><th>BILL TO</th><th>DATE</th><th>STATUS</th><th class="money-cell">TOTAL</th><th>ACTION</th></tr></thead><tbody id="invoice-register-rows">${rows}</tbody></table></div>
-        <div class="register-footnote">${charges.filter(x=>x.billing_status==="unbilled").length} unbilled customer-side charges are available across your accessible company records.</div>
+        <div class="register-footnote">${chargeVisibilityNote}</div>
       </article></section>
     `,"billing");
     bindShell();
