@@ -249,6 +249,8 @@ async function renderImportLcl() {
     const filterRows = () => { const q=document.querySelector('#lcl-search').value.toLowerCase(); const st=document.querySelector('#lcl-status').value; rows.forEach(row=>{row.hidden=!(row.dataset.search.includes(q)&&(!st||row.dataset.status===st));}); };
     document.querySelector('#lcl-search').addEventListener('input',filterRows);
     document.querySelector('#lcl-status').addEventListener('change',filterRows);
+    if(globalSearchTerm){document.querySelector('#lcl-search').value=globalSearchTerm;globalSearchTerm='';filterRows();}
+    if(globalNewShipment){globalNewShipment=false;document.querySelector('#lcl-form-wrap').hidden=false;setTimeout(()=>document.querySelector('#lcl-form-wrap')?.scrollIntoView({behavior:'smooth',block:'start'}),80);}
     document.querySelector('#new-import').addEventListener('click',()=>{document.querySelector('#lcl-form-wrap').hidden=false;document.querySelector('#lcl-form-wrap').scrollIntoView({behavior:'smooth'});});
     document.querySelector('#cancel-import').addEventListener('click',()=>{document.querySelector('#lcl-form-wrap').hidden=true;});
     document.querySelector('#lcl-create-form').addEventListener('submit',async e=>{
