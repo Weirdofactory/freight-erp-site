@@ -376,7 +376,14 @@ async function renderImportLclBilling(id) {
   const currencies=[...new Set(available.map(c=>c.currency_code.trim()))];
   const currencyOptions=currencies.map(c=>'<option value="'+esc(c)+'">'+esc(c)+'</option>').join('');
   const chargeRows=charges.map(c=>'<tr><td>'+(c.billing_status==='unbilled'?'<input class="bill-charge-check" type="checkbox" value="'+esc(c.id)+'" data-currency="'+esc(c.currency_code.trim())+'">':'—')+'</td><td><strong>'+esc(c.charge_code)+'</strong><br>'+esc(c.description)+'</td><td>'+esc(c.charge_side)+'</td><td>'+esc(c.quantity)+' × '+esc(c.rate)+'</td><td>'+money(c.amount,c.currency_code)+'</td><td>'+esc(c.billing_status)+'</td></tr>').join('')||'<tr><td colspan="6" class="empty">No customer charges entered.</td></tr>';
-  const invoiceRows=invoices.map(i=>'<tr><td><strong>'+esc(i.invoice_no||'Draft')+'</strong><br>'+esc(i.invoice_type==='proforma'?'Proforma Invoice':'Tax Invoice')+'</td><td>'+esc(i.invoice_date)+'</td><td>'+esc(i.status)+'</td><td>'+money(i.total_amount,i.currency_code)+'</td><td><button type="button" class="btn secondary invoice-preview" data-id="'+esc(i.id)+'">Preview / Print</button> '+(i.status==='draft'?'<button type="button" class="btn invoice-issue" data-id="'+esc(i.id)+'">Issue</button>':'')+'</td></tr>').join('')||'<tr><td colspan="5" class="empty">No invoices created for this shipment.</td></tr>';
+  const invoiceRows=invoices.map(i=>{
+   const finalExists=invoices.some(x=>x.source_invoice_id===i.id&&x.invoice_type==='tax'&&x.status!=='cancelled');
+   const copyButton=i.invoice_type==='proforma'&&i.status!=='cancelled'
+    ?(finalExists?'<span class="muted">Final invoice created</span>':'<button type="button" class="btn invoice-copy-final" data-id="'+esc(i.id)+'">Copy to Final Tax Invoice</button>'):'';
+   const deleteButton=i.invoice_type==='proforma'&&i.status==='draft'
+    ?'<button type="button" class="btn secondary invoice-delete" data-id="'+esc(i.id)+'">Delete Draft</button>':'';
+   return '<tr><td><strong>'+esc(i.invoice_no||'Draft')+'</strong><br>'+esc(i.invoice_type==='proforma'?'Proforma Invoice':'Tax Invoice')+(i.source_invoice_id?'<br><small>Copied from Proforma</small>':'')+'</td><td>'+esc(i.invoice_date)+'</td><td>'+esc(i.status)+'</td><td>'+money(i.total_amount,i.currency_code)+'</td><td><button type="button" class="btn secondary invoice-preview" data-id="'+esc(i.id)+'">Preview / Print</button> '+(i.status==='draft'?'<button type="button" class="btn invoice-issue" data-id="'+esc(i.id)+'">Issue</button>':'')+' '+copyButton+' '+deleteButton+'</td></tr>';
+  }).join('')||'<tr><td colspan="5" class="empty">No invoices created for this shipment.</td></tr>';
   root.innerHTML=shell(
    '<section class="heading"><div class="eyebrow">IMPORT LCL / BILLING</div><div class="module-heading"><div><h1>Billing · '+esc(shipment.shipment_no)+'</h1><p class="muted">'+esc(shipment.hbl_no||'HBL pending')+' · '+esc(shipment.consignee_name||'Consignee pending')+'</p></div><button id="billing-back" class="btn secondary" type="button">← Shipment detail</button></div></section>'+
    '<section class="grid"><article class="stat"><small>CUSTOMER CHARGES</small><strong>'+charges.filter(c=>c.charge_side==='customer').length+'</strong><span>All customer-side charges</span></article><article class="stat"><small>UNBILLED</small><strong>'+available.length+'</strong><span>Available for invoice</span></article><article class="stat"><small>INVOICES</small><strong>'+invoices.length+'</strong><span>Draft and issued</span></article><article class="stat"><small>BRANCH</small><strong class="small-stat">'+esc(branch.name)+'</strong><span>'+esc(branch.gstin||'GSTIN not configured')+'</span></article></section>'+
@@ -423,6 +430,22 @@ async function renderImportLclBilling(id) {
    button.disabled=true;button.textContent='Issuing…';
    const {error}=await supabase.rpc('issue_import_lcl_invoice',{p_invoice_id:button.dataset.id});
    if(error){alert(error.message);button.disabled=false;button.textContent='Issue';return;}
+   await renderImportLclBilling(id);
+  }));
+  document.querySelectorAll('.invoice-delete').forEach(button=>button.addEventListener('click',async()=>{
+   if(!confirm('Delete this draft proforma? Its invoice lines will also be deleted. This cannot be undone.'))return;
+   button.disabled=true;button.textContent='Deleting…';
+   const {error}=await supabase.from('import_lcl_invoices').delete().eq('id',button.dataset.id).eq('company_id',companyId).eq('invoice_type','proforma').eq('status','draft');
+   if(error){alert(error.message);button.disabled=false;button.textContent='Delete Draft';return;}
+   await renderImportLclBilling(id);
+  }));
+  document.querySelectorAll('.invoice-copy-final').forEach(button=>button.addEventListener('click',async()=>{
+   if(!confirm('Copy this proforma into a new Final Tax Invoice draft? The original proforma will remain unchanged.'))return;
+   button.disabled=true;button.textContent='Copying…';
+   const {data,error}=await supabase.rpc('create_import_lcl_tax_invoice_from_proforma',{
+    p_source_invoice_id:button.dataset.id,p_invoice_date:new Date().toISOString().slice(0,10),p_due_date:null
+   });
+   if(error){alert(error.message);button.disabled=false;button.textContent='Copy to Final Tax Invoice';return;}
    await renderImportLclBilling(id);
   }));
   document.querySelectorAll('.invoice-preview').forEach(button=>button.addEventListener('click',async()=>{
