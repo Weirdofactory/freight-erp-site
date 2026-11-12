@@ -35,3 +35,22 @@ html{background:var(--app-bg)}body{background:var(--app-bg);color:var(--ink);fon
 @media(max-width:760px){.app-shell{display:block}.sidebar{display:none;position:fixed;left:0;top:0;bottom:0;width:270px;height:100vh;box-shadow:15px 0 45px rgba(4,20,39,.24)}body.sidebar-open .sidebar{display:flex}.mobile-menu{display:inline-grid;place-items:center}.topbar{min-height:62px;padding:0 12px;gap:10px}.topbar-title{min-width:0;flex:0 0 auto}.breadcrumbs{font-size:7px}.topbar-title>div>strong{font-size:11px}.global-search{height:35px;min-width:90px;padding:0 7px;gap:5px}.global-search input{font-size:9px}.global-search kbd{display:none}.top-actions{gap:5px}.top-actions .btn{min-height:32px;padding:7px 9px;font-size:9px}.icon-button{width:31px;height:31px}.page-content{padding:18px 13px 28px}.app-footer{padding:12px 13px;font-size:8px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-rail{grid-template-columns:1fr}.welcome-banner{min-height:160px;padding:21px 20px}.welcome-art{width:95px;flex-basis:95px;transform:scale(.78);transform-origin:center right}.welcome-banner h1{font-size:25px}.page-heading,.module-heading{align-items:flex-start;flex-direction:column}.module-toolbar{align-items:stretch;flex-direction:column}.register-heading{align-items:stretch;flex-direction:column}.register-filters{min-width:0}.panel{padding:14px}.panel .table-wrap{margin:10px -14px -14px}.form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px}.table-wrap{max-width:100%}}
 @media(max-width:480px){.topbar-title>div{display:none}.topbar{gap:7px}.global-search{flex:1}.top-actions .btn{font-size:0;min-width:33px;padding:0}.top-actions .btn:after{content:"＋";font-size:16px}.welcome-art{display:none}.welcome-banner{min-height:145px}.welcome-meta{gap:10px;flex-wrap:wrap}.grid{grid-template-columns:1fr 1fr}.stat{min-height:96px;padding:13px}.stat strong{font-size:23px}.form-grid{grid-template-columns:1fr}.register-filters{flex-direction:column}.top-actions{margin-left:0}.app-footer{flex-direction:column;gap:4px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+
+/* Invoice conversion dialog */
+.erp-modal-backdrop{position:fixed;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(7,20,37,.58);backdrop-filter:blur(5px)}
+.erp-modal-backdrop[hidden]{display:none!important}
+.erp-modal{width:min(760px,100%);max-height:min(90vh,900px);overflow:auto;border:1px solid rgba(255,255,255,.55);border-radius:16px;background:#fff;box-shadow:0 28px 90px rgba(0,0,0,.28);animation:erpModalIn .18s ease-out}
+@keyframes erpModalIn{from{opacity:0;transform:translateY(9px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+.erp-modal-header{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:21px 24px 17px;background:rgba(255,255,255,.97);border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}
+.erp-modal-header h2{margin:5px 0;font-size:20px;letter-spacing:-.035em;color:#203751}
+.erp-modal-header p{margin:0;font-size:10px}
+.erp-modal-body{padding:18px 24px 22px}
+.erp-modal-body .form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.copy-source-strip{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-bottom:12px;padding:11px 13px;border:1px solid #dceaf5;border-radius:9px;background:#f4f9fd}
+.copy-source-strip span{font-size:8px;font-weight:900;letter-spacing:.12em;color:#7792aa}
+.copy-source-strip strong{font-size:11px;color:#24445f}
+.copy-source-strip small{margin-left:auto;color:#54718b;font-size:10px;font-weight:800}
+.modal-guidance{padding:11px 13px;border:1px solid #e5edf4;border-radius:8px;background:#f8fafc;color:#74859a;font-size:9px;line-height:1.6}
+.erp-modal-footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:9px;padding:13px 24px;background:rgba(255,255,255,.97);border-top:1px solid var(--line);backdrop-filter:blur(12px)}
+@media(max-width:600px){.erp-modal-backdrop{align-items:flex-end;padding:8px}.erp-modal{max-height:94vh;border-radius:15px 15px 10px 10px}.erp-modal-header,.erp-modal-body{padding-left:16px;padding-right:16px}.erp-modal-body .form-grid{grid-template-columns:1fr}.copy-source-strip small{margin-left:0}.erp-modal-footer{padding:12px 16px}.erp-modal-footer .btn{flex:1}}
