@@ -26,11 +26,34 @@ function renderLogin(error = "") {
         <form id="login-form">
           <div class="field"><label for="email">Work email</label><input id="email" name="email" type="email" autocomplete="username" placeholder="name@company.com" required></div>
           <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+          <div style="text-align:right;margin:-6px 0 16px"><button id="forgot-password" type="button" class="text-link">Forgot password?</button></div>
           ${message(error)}
+          <div id="reset-status" aria-live="polite"></div>
           ${btn("Sign in →", "btn wide")}
         </form><p class="muted" style="font-size:12px;margin-top:22px">Access is restricted to invited users. Contact your administrator if you need an account.</p>
       </div></section>
     </main>`;
+  document.querySelector("#forgot-password").addEventListener("click", async () => {
+    const email = document.querySelector("#email").value.trim().toLowerCase();
+    const status = document.querySelector("#reset-status");
+    if (!email) {
+      status.innerHTML = message("Enter your work email first, then select Forgot password.");
+      document.querySelector("#email").focus();
+      return;
+    }
+    const link = document.querySelector("#forgot-password");
+    link.disabled = true;
+    link.textContent = "Sending…";
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: "https://weirdofactory.github.io/freight-erp-site/"
+    });
+    status.innerHTML = resetError
+      ? message("Unable to send the recovery email right now. Please try again.")
+      : message("If an account exists for this email, a password recovery link has been sent. Check your inbox and spam folder.", "success");
+    link.disabled = false;
+    link.textContent = "Forgot password?";
+  });
+
   document.querySelector("#login-form").addEventListener("submit", async e => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -45,6 +68,39 @@ function renderLogin(error = "") {
   });
 }
 
+function renderResetPassword(error = "") {
+  root.innerHTML = `
+    <main class="auth-shell">
+      <section class="story"><div class="brand">FREIGHT<span> ERP</span></div>
+        <div class="story-copy"><div class="eyebrow">ACCOUNT SECURITY</div><h1>Set a new<br>password.</h1>
+        <p>Choose a strong password to secure your Freight ERP workspace.</p></div>
+        <small>Secure password recovery · Supabase Auth</small>
+      </section>
+      <section class="auth-panel"><div class="auth-card"><div class="eyebrow">PASSWORD RECOVERY</div><h2>Update password</h2>
+        <p class="muted">Enter and confirm your new password below.</p>
+        <form id="reset-form">
+          <div class="field"><label for="new-password">New password</label><input id="new-password" name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+          <div class="field"><label for="confirm-password">Confirm new password</label><input id="confirm-password" name="confirm" type="password" autocomplete="new-password" minlength="8" required></div>
+          ${message(error)}
+          <button class="btn wide" type="submit">Save new password →</button>
+        </form>
+      </div></section>
+    </main>`;
+  document.querySelector("#reset-form").addEventListener("submit", async e => {
+    e.preventDefault();
+    const password = document.querySelector("#new-password").value;
+    const confirm = document.querySelector("#confirm-password").value;
+    if (password.length < 8) { renderResetPassword("Use at least 8 characters."); return; }
+    if (password !== confirm) { renderResetPassword("The passwords do not match. Please try again."); return; }
+    const submit = e.currentTarget.querySelector("button");
+    submit.disabled = true;
+    submit.textContent = "Updating…";
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError) { renderResetPassword("Password update failed. The recovery link may have expired. Request a new one and try again."); return; }
+    recoveryMode = false;
+    await renderDashboard();
+  });
+}
 async function loadMemberships() {
   const { data, error } = await supabase.from("company_memberships")
     .select("company_id,status,companies(display_name,default_currency),roles(name,code)")
@@ -139,8 +195,14 @@ async function navigate() {
   await renderDashboard();
 }
 
-supabase.auth.onAuthStateChange((_event, session) => {
+let recoveryMode = false;
+supabase.auth.onAuthStateChange((event, session) => {
   currentUser = session?.user || null;
+  if (event === "PASSWORD_RECOVERY" && session?.user) {
+    recoveryMode = true;
+    renderResetPassword();
+    return;
+  }
   if (!session && route() !== "login") setRoute("login");
 });
 window.addEventListener("hashchange", navigate);
