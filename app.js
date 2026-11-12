@@ -277,7 +277,7 @@ async function renderImportLclDetail(id) {
    await renderImportLclDetail(id);
   });
   document.querySelector('#document-form').addEventListener('submit',async e=>{
-   e.preventDefault();const form=e.currentTarget,file=form.querySelector('input[name="document_file"]').files[0],out=document.querySelector('#document-message'),button=form.querySelector('button[type=submit');
+   e.preventDefault();const form=e.currentTarget,file=form.querySelector('input[name="document_file"]').files[0],out=document.querySelector('#document-message'),button=form.querySelector('button[type=submit]');
    if(!file){out.innerHTML=message('Choose a document to upload.');return;}
    const allowed=['application/pdf','image/jpeg','image/png','image/webp','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
    if(!allowed.includes(file.type)||file.size>25*1024*1024){out.innerHTML=message('Unsupported file type or file exceeds 25 MB.');return;}
