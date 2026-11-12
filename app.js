@@ -188,6 +188,7 @@ function bindShell() {
 async function navigate() {
   const { data: { user } } = await supabase.auth.getUser();
   currentUser = user;
+  if (recoveryMode && user) { renderResetPassword(); return; }
   const page = route();
   if (!user) { renderLogin(); return; }
   if (page === "platform") { await renderPlatform(); return; }
